@@ -2,7 +2,7 @@
 
 Put your farm logo on Farming Simulator 25 mods, swap or hide any texture, and add your own brand choices to the shop. You don't need GIANTS Editor, Blender or an image editor.
 
-![Your mods](docs/mods.png)
+
 
 ## What it does
 
@@ -17,15 +17,8 @@ Put your farm logo on Farming Simulator 25 mods, swap or hide any texture, and a
 - **Backs up before saving.** It copies the original mod before saving over it.
 - **Works offline.** Nothing is uploaded, and it needs no account.
 
-| Logos & decals | Texture editor | Shop options |
-|---|---|---|
-| ![](docs/logos.png) | ![](docs/editor.png) | ![](docs/shop-options.png) |
 
-![Place logos](docs/place-logos.png)
 
-| Logo library | Remove background | Files |
-|---|---|---|
-| ![](docs/library.png) | ![](docs/remove-background.png) | ![](docs/files.png) |
 
 ## Install (Windows)
 
@@ -58,34 +51,6 @@ The app isn't code-signed, so Windows SmartScreen may say *Windows protected you
 
 ## Brand logos and trademarks
 
-The app ships with **no** brand logos. Farm and brand logos you add stay on your computer. Brand names and logos belong to their owners. Farm Decal Swapper is not affiliated with GIANTS Software or any equipment maker.
-
-## Build from source
-
-You need [Node.js](https://nodejs.org/) 20 or newer.
-
-```bash
-npm install
-npm start              # run the app
-npm test               # core tests
-npm run dist           # package for Windows into dist/
-npm run build:web      # single-file browser version in dist/farm-decal-swapper.html
-```
-
-To build a copy with your own logos already in the library:
-
-```bash
-node scripts/make-seed.js personal/seed.js "My Farm=path/to/logo.png"
-node scripts/package-win.js --seed personal/seed.js
-```
-
-Pushing a tag like `v1.0.0` runs the GitHub Actions workflow. It builds the Windows zip and attaches it to a release.
-
-### How it works
-
-- `src/core.js` decodes and writes DDS textures (BC1, BC2, BC3, BC7 and uncompressed). It reads `.i3d` scenes and decrypts `.i3d.shapes` geometry, so it knows which part of each texture appears on the model and at what size. For placed logos it writes new sticker shapes into `.i3d.shapes` and adds them to the scene. It also finds shop decal options in vehicle XML.
-- `src/viewer.js` shows the model in 3D with three.js.
-- `src/app.js` is the interface. `electron/` is the desktop shell, which only reads and writes files when you ask it to.
 
 ## License
 
