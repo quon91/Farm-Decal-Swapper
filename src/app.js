@@ -680,7 +680,7 @@ function initPlace() {
   if (!S.viewer) {
     if (!window.THREE || !window.FDSViewer) { $('viewStatus').hidden = false; $('viewStatus').textContent = 'The 3D view couldn’t start (3D library missing).'; return; }
     try { S.viewer = FDSViewer($('view3d')); } catch (e) { $('viewStatus').hidden = false; $('viewStatus').textContent = 'The 3D view couldn’t start on this computer: ' + e.message; return; }
-    S.viewer.onPick = placeAt; S.viewer.onSelect = id => selectSticker(id);
+    S.viewer.onPick = placeAt; S.viewer.onSelect = id => selectSticker(id); S.viewer.onDrag = dragSticker;
     S.viewer.setBackground(getComputedStyle(document.documentElement).getPropertyValue('--check-a').trim() || '#d9ded3');
   }
   const sel = $('placeModel'); sel.innerHTML = '';
@@ -730,12 +730,23 @@ function updateTwin(st) {
   if (!hit) { st.twinNote = 'No matching surface found on the other side.'; return; }
   st.twin = { point: hit.point, normal: n, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId) }; st.twinNote = '';
 }
+function defaultWidth() { // about a fourteenth of the model's size: ~0.6 m on a truck, bigger on a shed
+  const s = S.viewer && S.viewer.modelSize || 7; return Math.round(Math.min(3, Math.max(0.3, s / 14)) * 20) / 20;
+}
+function moveTo(st, hit) { Object.assign(st, { point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId) }); }
+let dragTimer = 0;
+function dragSticker(id, hit) {
+  const st = S.mod.stickers.find(x => x.id === id); if (!st) return;
+  if (S.mod.place.sel !== id) S.mod.place.sel = id;
+  moveTo(st, hit); drawStickers();
+  clearTimeout(dragTimer); dragTimer = setTimeout(() => { updateTwin(st); drawStickers(); }, 60); // the far-side copy follows once the drag settles
+}
 function placeAt(hit) {
   if (!S.lib.length) { toast('Add a logo to your Logo library first.'); return; }
   const M = S.mod, logo = $('placeLogo').value;
-  const st = { id: 'st' + Date.now().toString(36), i3d: M.place.i3d, logo, point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId), width: 0.6, rot: 0, mirror: false, twin: null, twinNote: '' };
+  const st = { id: 'st' + Date.now().toString(36), i3d: M.place.i3d, logo, point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId), width: defaultWidth(), rot: 0, mirror: false, twin: null, twinNote: '' };
   M.stickers.push(st); M.place.sel = st.id; drawStickers(); updateChanges();
-  toast(`Sticker placed on “${hit.name || 'part'}”. Adjust its size and position on the right.`);
+  toast(`Sticker placed on “${hit.name || 'part'}”. Drag it to move it, or adjust it on the right.`);
 }
 function selectSticker(id) { S.mod.place.sel = id; drawStickers(); }
 function drawStickers() {
@@ -773,7 +784,7 @@ document.querySelectorAll('.nudge [data-n]').forEach(b => b.onclick = () => {
   const st = selected(); if (!st) return; const [dx, dy] = b.dataset.n.split(',').map(Number), step = +$('stStep').value, f = frameOf(st.normal, st.rot);
   const p = V.add(st.point, V.add(V.mul(f.r, dx * step), V.mul(f.u, dy * step)));
   const hit = S.viewer.castAt(V.add(p, V.mul(f.n, 0.2)), V.mul(f.n, -1), 0.4); // stay on the surface
-  if (hit) { st.point = hit.point; st.nodeId = hit.nodeId; st.name = hit.name; st.parentM = S.viewer.worldMatrixOf(hit.nodeId); } else st.point = p;
+  if (hit) { moveTo(st, { ...hit, normal: st.normal }); } else st.point = p;
   updateTwin(st); drawStickers();
 });
 /** Write stickers into one model: new shapes, a material + texture per logo, and Shape nodes under the parts they sit on. */
@@ -835,8 +846,8 @@ function plan() {
 function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length; }
 function updateChanges() {
   if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0); let n = p.tex.length + nOpt + p.txt.length + p.stk.length;
-  $('cntStickers').textContent = p.stk.length ? p.stk.length : '';
   const nSt = p.stk.reduce((a, st) => a + 1 + (st.twin ? 1 : 0), 0);
+  $('cntStickers').textContent = nSt || '';
   const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`);
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
@@ -910,9 +921,18 @@ async function saveMod() {
   if (saved && saved.length) {
     saved.sort((a, b) => a.order - b.order);
     for (const r of saved) { try { const rec = await addLogo(r.image, r.name, { id: r.id, cleaned: r.cleaned }); rec.original = r.original || r.image; rec.order = r.order; if (r.cleaned) rec.needsBg = false; } catch (e) {} }
-  } else if (window.FDS_SEED && window.FDS_SEED.length && !store.get('seeded')) {
-    for (const d of window.FDS_SEED) { const rec = await addLogo(dataBlob(d.src), d.name, { id: d.id }); rec.needsBg = false; await saveRec(rec); }
-    store.set('seeded', '1');
+  }
+  // preloaded logos: add any this copy hasn't added before (an update can bring new ones; deleted ones stay deleted)
+  if (window.FDS_SEED && window.FDS_SEED.length) {
+    let done = []; try { done = JSON.parse(store.get('seededIds') || '[]'); } catch (e) {}
+    if (!done.length && store.get('seeded')) done = ['seed-0', 'seed-1']; // first builds preloaded two logos
+    const have = new Set(S.lib.map(l => l.id));
+    for (const d of window.FDS_SEED) {
+      if (done.includes(d.id) || have.has(d.id)) continue;
+      try { const rec = await addLogo(dataBlob(d.src), d.name, { id: d.id }); rec.needsBg = false; rec.order = S.lib.length; await saveRec(rec); } catch (e) {}
+      done.push(d.id);
+    }
+    store.set('seededIds', JSON.stringify(done)); store.set('seeded', '1');
   }
   renderLib(); setView('mods'); loadModsFolder();
 })();

@@ -12,7 +12,7 @@ function FDSViewer(canvas) {
   const sun = new THREE.DirectionalLight(0xffffff, 0.75); camera.add(sun); sun.position.set(0.4, 0.8, 0.3); scene.add(camera);
   const root = new THREE.Group(); scene.add(root);
   const stickerGroup = new THREE.Group(); scene.add(stickerGroup);
-  let meshes = [], disposed = false, needs = true, onPick = null, onSelect = null, bg = '#d9ded3';
+  let meshes = [], disposed = false, needs = true, onPick = null, onSelect = null, onDrag = null, bg = '#d9ded3', modelSize = 0;
   const ray = new THREE.Raycaster();
 
   /* ---------- orbit camera ---------- */
@@ -24,20 +24,36 @@ function FDSViewer(canvas) {
   }
   let drag = null;
   canvas.addEventListener('contextmenu', e => e.preventDefault());
-  canvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, pan: e.button === 2 || e.shiftKey, moved: false }; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointerdown', e => {
+    drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, pan: e.button === 2 || e.shiftKey, moved: false, sticker: null };
+    if (e.button === 0 && !e.shiftKey) { const st = stickerAt(e); if (st) drag.sticker = st; } // left-drag on a sticker moves it
+    canvas.setPointerCapture(e.pointerId);
+  });
   canvas.addEventListener('pointermove', e => {
-    if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+    if (!drag) { canvas.style.cursor = stickerAt(e) ? 'grab' : ''; return; }
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
+    if (drag.sticker) {
+      if (!drag.moved) return; canvas.style.cursor = 'grabbing';
+      ray.setFromCamera(ndc(e), camera); const hit = ray.intersectObjects(meshes, false)[0];
+      if (hit && onDrag) onDrag(drag.sticker, describeHit(hit, ray.ray.direction));
+      return;
+    }
     if (drag.pan) {
       const s = orbit.dist * 0.0018, right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
       orbit.target.addScaledVector(right, -dx * s).addScaledVector(up, dy * s);
     } else { orbit.yaw -= dx * 0.008; orbit.pitch = Math.max(-1.5, Math.min(1.5, orbit.pitch + dy * 0.008)); }
     placeCamera();
   });
-  canvas.addEventListener('pointerup', e => { const d = drag; drag = null; if (d && !d.moved && e.button === 0) click(e); });
+  canvas.addEventListener('pointerup', e => { const d = drag; drag = null; canvas.style.cursor = ''; if (d && !d.moved && e.button === 0) click(e); });
   canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.2, Math.min(500, orbit.dist * Math.exp(e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
 
   function ndc(e) { const r = canvas.getBoundingClientRect(); return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
+  function stickerAt(e) { // id of the sticker under the pointer, if it isn't hidden behind the model
+    ray.setFromCamera(ndc(e), camera);
+    const st = ray.intersectObjects(stickerGroup.children.filter(o => o.isMesh), false)[0]; if (!st) return null;
+    const hit = ray.intersectObjects(meshes, false)[0]; return !hit || st.distance <= hit.distance + 0.01 ? st.object.userData.stickerId : null;
+  }
   function click(e) {
     ray.setFromCamera(ndc(e), camera);
     const st = ray.intersectObjects(stickerGroup.children, false)[0], hit = ray.intersectObjects(meshes, false)[0];
@@ -72,6 +88,7 @@ function FDSViewer(canvas) {
       const a = m.attrs, params = {}; for (const c of Core.kids(m, 'CustomParameter')) params[c.attrs.name] = c.attrs.value;
       const tex = Core.kids(m, 'Texture')[0]; let color = null;
       if (params.colorMat0) color = params.colorMat0.split(/\s+/).slice(0, 3).map(Number);
+      else if (params.colorScale) color = params.colorScale.split(/\s+/).slice(0, 3).map(Number); // FS25 vehicle shader
       else if (a.diffuseColor) color = a.diffuseColor.split(/\s+/).slice(0, 3).map(Number);
       const mat = new THREE.MeshLambertMaterial({ color: color ? new THREE.Color(color[0], color[1], color[2]).convertLinearToSRGB() : new THREE.Color(0.62, 0.64, 0.6), side: THREE.DoubleSide, transparent: a.alphaBlending === 'true', alphaTest: a.alphaBlending === 'true' ? 0.05 : 0 });
       if (tex && !params.colorMat0) { const ref = files[tex.attrs.fileId]; const path = ref && !ref.startsWith('$') ? Core.toDDS(Core.resolveRef(opts.i3dPath, ref)) : null; if (path) texJobs.push({ mat, path }); }
@@ -122,7 +139,7 @@ function FDSViewer(canvas) {
   }
   function fit() {
     const box = new THREE.Box3(); for (const m of meshes) box.expandByObject(m);
-    if (box.isEmpty()) return; const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length();
+    if (box.isEmpty()) return; const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length(); modelSize = s;
     orbit.target.copy(c); orbit.dist = s * 1.15; camera.near = Math.max(0.005, s / 2000); camera.far = s * 50; camera.updateProjectionMatrix(); placeCamera();
   }
 
@@ -156,7 +173,8 @@ function FDSViewer(canvas) {
   placeCamera();
   return {
     load, setStickers, castAt, worldMatrixOf, focus, fit,
-    set onPick(f) { onPick = f; }, set onSelect(f) { onSelect = f; },
+    set onPick(f) { onPick = f; }, set onSelect(f) { onSelect = f; }, set onDrag(f) { onDrag = f; },
+    get modelSize() { return modelSize; },
     setBackground(c) { bg = c; needs = true; },
     snapshot() { renderer.render(scene, camera); return canvas.toDataURL('image/png'); },
     dispose() { disposed = true; clear(); renderer.dispose(); },

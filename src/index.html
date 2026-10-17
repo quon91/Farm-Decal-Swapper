@@ -83,7 +83,7 @@
         <div class="place">
           <div class="viewwrap checker">
             <canvas id="view3d" aria-label="3D view of the model"></canvas>
-            <div class="viewhint">Drag to turn · right-drag or Shift-drag to move · scroll to zoom · click to place</div>
+            <div class="viewhint">Drag to turn · right-drag or Shift-drag to move the view · scroll to zoom · click to place · drag a logo to move it</div>
             <div class="viewstatus" id="viewStatus" hidden></div>
           </div>
           <div class="placeside">
@@ -91,7 +91,7 @@
             <div class="field"><label for="placeLogo">Logo</label><select id="placeLogo"></select></div>
             <div class="stickedit" id="stickerEdit" hidden>
               <div class="row-between"><h3>Selected sticker</h3><button type="button" class="btn small danger" id="stDelete">Delete</button></div>
-              <div class="field"><label for="stWidth">Width <span class="mono" id="stWidthV"></span></label><input type="range" id="stWidth" min="0.05" max="4" step="0.01"></div>
+              <div class="field"><label for="stWidth">Width <span class="mono" id="stWidthV"></span></label><input type="range" id="stWidth" min="0.05" max="6" step="0.01"></div>
               <div class="field"><label for="stRot">Rotation <span class="mono" id="stRotV"></span></label><input type="range" id="stRot" min="-180" max="180" step="1"></div>
               <div class="field"><span class="lab">Nudge</span>
                 <div class="nudge"><button type="button" class="btn small" data-n="0,1" aria-label="Move up">↑</button><button type="button" class="btn small" data-n="-1,0" aria-label="Move left">←</button><button type="button" class="btn small" data-n="1,0" aria-label="Move right">→</button><button type="button" class="btn small" data-n="0,-1" aria-label="Move down">↓</button>
