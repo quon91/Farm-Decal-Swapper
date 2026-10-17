@@ -35,4 +35,17 @@ test('shop choice is inserted before the closing tag, keeping CRLF', () => {
   assert(!/[^\r]\n/.test(out), 'line endings stay CRLF');
   Core.parseXML(out);
 });
+test('a new sticker shape can be built, appended and read back', () => {
+  const plain0 = Core.buildShapeEntity({ name: 'probe', shapeId: 1, verts: [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], tris: [0, 1, 2, 0, 2, 3], uvs: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+  const base = Core.emptyShapesFile(7); assert.strictEqual(Core.indexShapes(base).list.length, 0);
+  const out = Core.appendShapeEntities(base, [plain0]);
+  const idx = Core.indexShapes(out); assert.strictEqual(idx.list.length, 1); assert.strictEqual(idx.list[0].name, 'probe');
+  const g = Core.readShape(out, idx, idx.list[0]);
+  assert.deepStrictEqual([...g.pos], [0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0]); assert.deepStrictEqual([...g.tris], [0, 1, 2, 0, 2, 3]); assert.deepStrictEqual([...g.uv], [0, 0, 1, 0, 1, 1, 0, 1]);
+});
+test('i3d rotations compose as Rz * Ry * Rx', () => {
+  const M = Core.mat([0, 0, 0], [90, 0, 90], [1, 1, 1]); // x: 90 then z: 90
+  const v = [0, 1, 0], out = [M[0] * v[0] + M[4] * v[1] + M[8] * v[2], M[1] * v[0] + M[5] * v[1] + M[9] * v[2], M[2] * v[0] + M[6] * v[1] + M[10] * v[2]].map(x => Math.round(x * 1e6) / 1e6 + 0);
+  assert.deepStrictEqual(out, [0, 0, 1]); // Rx(90) takes +Y to +Z, then Rz leaves +Z alone
+});
 console.log(`\n${n} tests passed`);

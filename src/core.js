@@ -105,10 +105,14 @@ function bc3Alpha(u8, o, out) { // fills out[16] alpha values
 }
 
 /** Decode the top mip of a DDS to RGBA. Returns {width,height,format,rgba} or {error}. */
-function decodeDDS(u8) {
+function decodeDDS(u8, opts) {
   const info = ddsInfo(u8);
   if (info.error) return info;
-  const { width: W, height: H, dataOff } = info; let fmt = info.fmt;
+  let { width: W, height: H, dataOff } = info; const fmt = info.fmt;
+  if (opts && opts.maxSize && typeof fmt === 'string' && /^BC[1-7]$/.test(fmt)) { // skip to the first mip that fits
+    const bs = fmt === 'BC1' || fmt === 'BC4' ? 8 : 16;
+    for (let m = 0; m < info.mips - 1 && Math.max(W, H) > opts.maxSize; m++) { dataOff += Math.max(1, (W + 3) >> 2) * Math.max(1, (H + 3) >> 2) * bs; W = Math.max(1, W >> 1); H = Math.max(1, H >> 1); }
+  }
   const rgba = new Uint8ClampedArray(W * H * 4);
   const fmtName = typeof fmt === 'string' ? fmt : (fmt ? 'RGB' + (fmt.hasAlpha ? 'A' : '') + fmt.bitCount : 'unknown');
   const bw = Math.max(1, (W + 3) >> 2), bh = Math.max(1, (H + 3) >> 2);
@@ -280,7 +284,7 @@ function parseXML(text) {
   let cur = root; const re = /<!--[\s\S]*?-->|<!\[CDATA\[[\s\S]*?\]\]>|<\?[\s\S]*?\?>|<!(?!--)[^>]*>|<\/([^\s>]+)\s*>|<([^\s/>!?]+)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
   let m;
   while ((m = re.exec(text))) {
-    if (m[1]) { if (cur.parent) cur = cur.parent; continue; }
+    if (m[1]) { cur.closeStart = m.index; cur.closeEnd = re.lastIndex; if (cur.parent) cur = cur.parent; continue; }
     if (!m[2]) continue;
     const attrs = {}; const ar = /([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g; let a;
     while ((a = ar.exec(m[3] || ''))) attrs[a[1]] = a[2] !== undefined ? a[2] : a[3];
@@ -360,50 +364,57 @@ function readShape(u8, idx, ent) {
   const dv = new DataView(b.buffer);
   const nl = dv.getInt32(0, true), off = (4 + nl + 3) & ~3, I = i => dv.getInt32(off + 4 * i, true), F = i => dv.getFloat32(off + 4 * i, true);
   const nidx = I(5), nsub = I(6), nv = I(7), flags = I(8);
-  if (nv <= 0 || nidx <= 0 || nsub <= 0 || nsub > 64) return null;
-  const isz = nv <= 65535 ? 2 : 4;
-  let found = null;
-  for (let k = 9; k < 9 + 8 * nsub + 6; k++) {
-    const s = off + 4 * k; if (s + nidx * isz > b.length) break;
-    let mn = 1e9, mx = -1;
-    for (let i = 0; i < nidx; i++) { const v = isz === 2 ? dv.getUint16(s + 2 * i, true) : dv.getUint32(s + 4 * i, true); if (v < mn) mn = v; if (v > mx) mx = v; if (mx >= nv) break; }
-    if (mn !== 0 || mx !== nv - 1) continue;
-    const p = s + ((nidx * isz + 3) & ~3);
-    if (p + nv * 12 > b.length) continue;
-    let ok = true; for (let i = 0; i < Math.min(nv * 3, 300); i++) { const f = dv.getFloat32(p + 4 * i, true); if (!isFinite(f) || Math.abs(f) > 1e5) { ok = false; break; } }
-    if (ok) { found = { k, s, p }; break; }
+  if (nv <= 0 || nidx <= 0 || nsub <= 0 || nsub > 256) return null;
+  const isz = nv <= 65535 ? 2 : 4, nuv = [2, 4, 8, 16].filter(f => flags & f).length, rec = 4 + nuv; // subset record: fv, nv, fi, ni + one uv density per uv set
+  const cx = F(1), cy = F(2), cz = F(3), rad = Math.abs(F(4)) * 1.02 + 1e-3, r0 = idx.version >= 10 ? 10 : 9;
+  // subsets
+  let subsets = [], sum = 0;
+  for (let i = 0; i < nsub; i++) { const fi = I(r0 + i * rec + 2), ni = I(r0 + i * rec + 3); if (fi < 0 || ni < 0 || fi + ni > nidx) { subsets = null; break; } subsets.push({ fi, ni }); sum += ni; }
+  if (subsets && sum !== nidx) subsets = null;
+  // indices start after the subset records plus a variable block; find it: valid indices AND positions inside the stored bounding sphere
+  const base = off + 4 * (r0 + nsub * rec);
+  // candidates: indices all in range, points inside the bounding sphere; best = every point used and no collapsed triangles
+  let found = null, fallback = null, bestDeg = Infinity;
+  const used = new Uint8Array(nv);
+  for (let s = base; s <= base + 4 * 96 && bestDeg > 0; s += 4) {
+    if (s + nidx * isz > b.length) break;
+    let ok = true, degen = 0; used.fill(0);
+    const at = i => isz === 2 ? dv.getUint16(s + 2 * i, true) : dv.getUint32(s + 4 * i, true);
+    for (let i = 0; i < nidx; i += 3) {
+      const a = at(i), c = at(i + 1), d = at(i + 2);
+      if (a >= nv || c >= nv || d >= nv) { ok = false; break; }
+      used[a] = used[c] = used[d] = 1; if (a === c || c === d || a === d) degen++;
+    }
+    if (!ok) continue;
+    const p = s + ((nidx * isz + 3) & ~3); if (p + nv * 12 > b.length) continue;
+    const step = Math.max(1, Math.floor(nv / 400));
+    for (let i = 0; i < nv && ok; i += step) { const x = dv.getFloat32(p + 12 * i, true) - cx, y = dv.getFloat32(p + 12 * i + 4, true) - cy, z = dv.getFloat32(p + 12 * i + 8, true) - cz; if (!(Math.hypot(x, y, z) <= rad)) ok = false; }
+    if (!ok) continue;
+    let cover = 0; for (let i = 0; i < nv; i++) cover += used[i];
+    // a start that is a few slots early still passes the other checks but adds collapsed (0,0,0) triangles: keep the cleanest
+    if (cover >= nv * 0.995 && degen <= nidx / 3 * 0.01) { if (degen < bestDeg) { bestDeg = degen; found = { s, p }; } }
+    else if (!fallback) fallback = { s, p };
   }
+  found = found || fallback;
   if (!found) return null;
   const tris = new Uint32Array(nidx);
   for (let i = 0; i < nidx; i++) tris[i] = isz === 2 ? dv.getUint16(found.s + 2 * i, true) : dv.getUint32(found.s + 4 * i, true);
   const pos = new Float32Array(b.buffer.slice(found.p, found.p + nv * 12));
-  let uvOff = found.p + nv * 12 + ((flags & 1) ? nv * 12 : 0) + ((flags & 128) ? nv * 16 : 0);
-  if (!(flags & 2) || uvOff + nv * 8 > b.length) return { nv, pos, tris, uv: null, subsets: null };
+  const uvOff = found.p + nv * 12 + ((flags & 1) ? nv * 12 : 0) + ((flags & 128) ? nv * 16 : 0);
+  if (!(flags & 2) || uvOff + nv * 8 > b.length) return { nv, pos, tris, uv: null, subsets, name: ent.name };
   const uv = new Float32Array(b.buffer.slice(uvOff, uvOff + nv * 8));
-  // subset records: [fv, nv, fi, ni, density...] starting at int 10
-  let subsets = null;
-  for (const r of [5, 6, 7, 4]) {
-    if (10 + r * nsub > found.k) continue;
-    const recs = []; let sum = 0, ok = true;
-    for (let i = 0; i < nsub; i++) {
-      const fi = I(10 + i * r + 2), ni = I(10 + i * r + 3);
-      if (fi < 0 || ni < 0 || fi + ni > nidx || ni % 3) { ok = false; break; }
-      recs.push({ fi, ni }); sum += ni;
-    }
-    if (ok && sum === nidx) { subsets = recs; break; }
-  }
   if (!subsets && nsub === 1) subsets = [{ fi: 0, ni: nidx }];
   return { nv, pos, uv, tris, subsets, name: ent.name };
 }
 
 /* ---- 3D helpers ---- */
 const D2R = Math.PI / 180;
-function mat(t, r, s) { // column-major 4x4 from translation, euler XYZ degrees, scale
+function mat(t, r, s) { // column-major 4x4 from translation, i3d rotation (degrees), scale
   const [x, y, z] = r.map(v => v * D2R), cx = Math.cos(x), sx = Math.sin(x), cy = Math.cos(y), sy = Math.sin(y), cz = Math.cos(z), sz = Math.sin(z);
-  // R = Rx * Ry * Rz
-  const R = [cy * cz, cx * sz + sx * sy * cz, sx * sz - cx * sy * cz,
-             -cy * sz, cx * cz - sx * sy * sz, sx * cz + cx * sy * sz,
-             sy, -sx * cy, cx * cy];
+  // i3d rotations are XYZ Euler angles: R = Rz * Ry * Rx (columns listed below)
+  const R = [cz * cy, sz * cy, -sy,
+             -sz * cx + cz * sy * sx, cz * cx + sz * sy * sx, cy * sx,
+             sz * sx + cz * sy * cx, -cz * sx + sz * sy * cx, cy * cx];
   return [R[0] * s[0], R[1] * s[0], R[2] * s[0], 0, R[3] * s[1], R[4] * s[1], R[5] * s[1], 0, R[6] * s[2], R[7] * s[2], R[8] * s[2], 0, t[0], t[1], t[2], 1];
 }
 function mmul(a, b) { const o = new Array(16).fill(0); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]; return o; }
@@ -606,6 +617,86 @@ function addConfigOption(src, group, name, texPath, makeDefault) {
   return src.slice(0, lineStart) + block + src.slice(lineStart);
 }
 
-return { ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
+/* ================= adding new geometry (stickers) ================= */
+/**
+ * Build the plain (unencrypted) bytes of a one-material shape for an .i3d.shapes file (format version 10).
+ * verts: [[x,y,z]...] in the parent's local space; tris: flat index list; uvs: [[u,v]...]
+ * Layout matches shapes written by the GIANTS exporter: header, one subset, 16-bit indices, positions, normals, uv0.
+ */
+function buildShapeEntity({ name, shapeId, verts, tris, uvs, version = 10 }) {
+  const nv = verts.length, ni = tris.length;
+  // normals from the triangles (counter-clockwise = front, as in exported shapes)
+  const nrm = verts.map(() => [0, 0, 0]);
+  for (let i = 0; i < ni; i += 3) {
+    const [a, b, c] = [tris[i], tris[i + 1], tris[i + 2]].map(k => verts[k]);
+    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    for (const k of [tris[i], tris[i + 1], tris[i + 2]]) for (let j = 0; j < 3; j++) nrm[k][j] += n[j];
+  }
+  for (const n of nrm) { const l = Math.hypot(...n) || 1; n[0] /= l; n[1] /= l; n[2] /= l; }
+  const ctr = [0, 1, 2].map(j => verts.reduce((t, v) => t + v[j], 0) / nv), rad = Math.max(...verts.map(v => Math.hypot(v[0] - ctr[0], v[1] - ctr[1], v[2] - ctr[2])));
+  const nameB = new TextEncoder().encode(name), head = (4 + nameB.length + 3) & ~3;
+  const idxBytes = (ni * 2 + 3) & ~3;
+  const v10 = version >= 10, size = head + 4 * (v10 ? 16 : 14) + idxBytes + nv * 12 * 2 + nv * 8 + 4;
+  const out = new Uint8Array(size), dv = new DataView(out.buffer); let o = 0;
+  dv.setInt32(o, nameB.length, true); out.set(nameB, 4); o = head;
+  const I = v => { dv.setInt32(o, v, true); o += 4; }, F = v => { dv.setFloat32(o, v, true); o += 4; };
+  I(shapeId); F(ctr[0]); F(ctr[1]); F(ctr[2]); F(rad);
+  I(ni); I(1); I(nv); I(3);            // index count, subsets, vertex count, flags (normals + uv0)
+  if (v10) I(0);                       // reserved (version 10+)
+  I(0); I(nv); I(0); I(ni); F(1);      // subset: first vertex, vertex count, first index, index count, uv density
+  if (v10) I(0);                       // reserved (version 10+)
+  for (let i = 0; i < ni; i++) dv.setUint16(o + 2 * i, tris[i], true); o += idxBytes;
+  for (const v of verts) { F(v[0]); F(v[1]); F(v[2]); }
+  for (const n of nrm) { F(n[0]); F(n[1]); F(n[2]); }
+  for (const t of uvs) { F(t[0]); F(t[1]); }
+  I(0);                                // reserved
+  return out;
+}
+/** Return a copy of an .i3d.shapes file with extra shape entities appended (encrypted like the rest). */
+function appendShapeEntities(u8, datas) {
+  const idx = indexShapes(u8), last = idx.list[idx.list.length - 1];
+  datas = datas.map(d => typeof d === 'function' ? d(idx.version) : d); // builders get the file's format version
+  let blk = last ? last.blk + Math.ceil(last.size / 64) : 1, pos = last ? last.pos + last.size : 8;
+  if (pos !== u8.length) throw new Error('unexpected data at the end of the shapes file');
+  const extra = datas.reduce((t, d) => t + 8 + d.length, 0), out = new Uint8Array(u8.length + extra);
+  out.set(u8);
+  // count lives in the first 4 bytes after the header, encrypted with block 0
+  const cnt = decryptRange(u8, 4, 4, 0, idx.ks), n = (cnt[0] | (cnt[1] << 8) | (cnt[2] << 16) | (cnt[3] << 24)) + datas.length;
+  const nb = new Uint8Array(4); new DataView(nb.buffer).setInt32(0, n, true);
+  const xorWith = (plain, b) => { const ksb = decryptRange(new Uint8Array(plain.length), 0, plain.length, b, idx.ks); return plain.map((v, i) => v ^ ksb[i]); };
+  out.set(xorWith(nb, 0), 4);
+  for (const d of datas) {
+    const t = new Uint8Array(4), s = new Uint8Array(4); new DataView(t.buffer).setInt32(0, 1, true); new DataView(s.buffer).setInt32(0, d.length, true);
+    out.set(xorWith(t, blk), pos); pos += 4; blk += 1;
+    out.set(xorWith(s, blk), pos); pos += 4; blk += 1;
+    out.set(xorWith(d, blk), pos); pos += d.length; blk += Math.ceil(d.length / 64);
+  }
+  // read-back check: every old part unchanged in count, every new part readable
+  const chk = indexShapes(out);
+  if (chk.list.length !== idx.list.length + datas.length) throw new Error('shapes file check failed (part count)');
+  for (const e of chk.list.slice(idx.list.length)) if (!readShape(out, chk, e)) throw new Error('shapes file check failed (new part unreadable)');
+  return out;
+}
+/** Read every shape in a shapes file (for the 3D view). Returns Map(shapeId -> geometry). */
+function readAllShapes(u8, onProgress) {
+  const idx = indexShapes(u8), out = new Map(); let i = 0;
+  for (const e of idx.list) { if (e.type === 1) { try { const g = readShape(u8, idx, e); if (g) out.set(e.shapeId, g); } catch (err) {} } if (onProgress && ++i % 20 === 0) onProgress(i / idx.list.length); }
+  return out;
+}
+/** An empty .i3d.shapes file (version 10) — used by the tests. */
+function emptyShapesFile(seed) { const ks = makeKeystream(seed), w = new Uint32Array(16); ks(0, w); const b = new Uint8Array(w.buffer); return Uint8Array.of(10, 0, seed, 0, b[0], b[1], b[2], b[3]); }
+const maxShapeId = u8 => Math.max(0, ...indexShapes(u8).list.map(e => e.shapeId));
+/** Insert text at several positions in one pass. edits: [{at, text}] */
+function insertAll(src, edits) { let out = src; for (const e of edits.slice().sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.at); return out; }
+/** Make a relative path from one mod file's folder to another mod file. */
+function relPath(fromFile, toFile) {
+  const a = dirOf(fromFile).split('/').filter(Boolean), b = toFile.split('/'); let k = 0;
+  while (k < a.length && k < b.length - 1 && a[k] === b[k]) k++;
+  return '../'.repeat(a.length - k) + b.slice(k).join('/');
+}
+
+return { emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+  ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

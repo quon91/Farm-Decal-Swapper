@@ -22,10 +22,17 @@ fs.copyFileSync(MOD, path.join(mods, path.basename(MOD)));
   await pg.waitForSelector('#view-mod:not([hidden])', { timeout: 180000 }); await pg.waitForTimeout(1500);
   const card = await pg.$('#gridLikely .tex'); if (!card) throw new Error('no logo-like textures found in this mod');
   await card.click(); await pg.waitForTimeout(800); await pg.click('#edApply');
+  // place a sticker in 3D: click around the middle of the view until one lands on the model
+  await pg.click('.tab[data-tab=place]');
+  await pg.waitForFunction(() => document.getElementById('viewStatus').hidden, null, { timeout: 180000 }); await pg.waitForTimeout(1500);
+  const box = await (await pg.$('#view3d')).boundingBox();
+  for (const [fx, fy] of [[0.5, 0.5], [0.45, 0.55], [0.55, 0.45], [0.4, 0.5], [0.6, 0.6]]) { await pg.mouse.click(box.x + box.width * fx, box.y + box.height * fy); await pg.waitForTimeout(400); if (await pg.isVisible('#stickerEdit')) break; }
+  if (!(await pg.isVisible('#stickerEdit'))) throw new Error('could not place a sticker on the model');
+  await pg.check('#stMirror'); await pg.waitForTimeout(300);
   await pg.click('#btnSave');
   await pg.waitForFunction(() => /Saved to|failed/.test(document.getElementById('saveMsg').textContent), null, { timeout: 600000 });
   const msg = await pg.textContent('#saveMsg'); console.log(msg);
   await app.close();
   if (!/Saved to/.test(msg) || errs.length) { console.error('FAILED', errs); process.exit(1); }
-  console.log('ok - app opened a mod, applied a logo and saved with a backup');
+  console.log('ok - app opened a mod, applied a logo, placed a 3D sticker and saved with a backup');
 })().catch(e => { console.error('FAILED', e); process.exit(1); });

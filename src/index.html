@@ -68,6 +68,7 @@
       <div class="savemsg" id="saveMsg" hidden></div>
       <div class="tabs" role="tablist" aria-label="Mod sections">
         <button type="button" role="tab" class="tab" data-tab="logos" aria-selected="true">Logos &amp; decals</button>
+        <button type="button" role="tab" class="tab" data-tab="place" aria-selected="false">Place logos <span class="tcount" id="cntStickers"></span></button>
         <button type="button" role="tab" class="tab" data-tab="options" aria-selected="false">Shop options <span class="tcount" id="cntOptions"></span></button>
         <button type="button" role="tab" class="tab" data-tab="textures" aria-selected="false">All textures <span class="tcount" id="cntTex"></span></button>
         <button type="button" role="tab" class="tab" data-tab="files" aria-selected="false">Files <span class="tcount" id="cntFiles"></span></button>
@@ -76,6 +77,31 @@
       <div class="tabpane" id="tab-logos">
         <p class="lead">These textures look like logos or decals. Click one to put your logo on it, hide it, or paint over it.</p>
         <div class="grid" id="gridLikely"></div>
+      </div>
+      <div class="tabpane" id="tab-place" hidden>
+        <p class="lead">Put a logo anywhere on the model, even where there was none. Click the model to place it; it sticks to the part you click, so a logo on a door moves with the door.</p>
+        <div class="place">
+          <div class="viewwrap checker">
+            <canvas id="view3d" aria-label="3D view of the model"></canvas>
+            <div class="viewhint">Drag to turn · right-drag or Shift-drag to move · scroll to zoom · click to place</div>
+            <div class="viewstatus" id="viewStatus" hidden></div>
+          </div>
+          <div class="placeside">
+            <div class="field" id="fPlaceModel"><label for="placeModel">Model</label><select id="placeModel"></select></div>
+            <div class="field"><label for="placeLogo">Logo</label><select id="placeLogo"></select></div>
+            <div class="stickedit" id="stickerEdit" hidden>
+              <div class="row-between"><h3>Selected sticker</h3><button type="button" class="btn small danger" id="stDelete">Delete</button></div>
+              <div class="field"><label for="stWidth">Width <span class="mono" id="stWidthV"></span></label><input type="range" id="stWidth" min="0.05" max="4" step="0.01"></div>
+              <div class="field"><label for="stRot">Rotation <span class="mono" id="stRotV"></span></label><input type="range" id="stRot" min="-180" max="180" step="1"></div>
+              <div class="field"><span class="lab">Nudge</span>
+                <div class="nudge"><button type="button" class="btn small" data-n="0,1" aria-label="Move up">↑</button><button type="button" class="btn small" data-n="-1,0" aria-label="Move left">←</button><button type="button" class="btn small" data-n="1,0" aria-label="Move right">→</button><button type="button" class="btn small" data-n="0,-1" aria-label="Move down">↓</button>
+                <select id="stStep" aria-label="Nudge step"><option value="0.01">1 cm</option><option value="0.05" selected>5 cm</option><option value="0.2">20 cm</option></select></div></div>
+              <label class="check"><input type="checkbox" id="stMirror"> <span>Also put it on the other side</span></label>
+              <p class="muted hint" id="stInfo"></p>
+            </div>
+            <div class="field"><span class="lab">Stickers on this model</span><div class="stickers" id="stickerList"></div></div>
+          </div>
+        </div>
       </div>
       <div class="tabpane" id="tab-options" hidden>
         <p class="lead">Some vehicles let you pick a decal in the shop, like door logos. Tick logos from your library to add each one as a new choice.</p>
@@ -232,9 +258,11 @@
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="vendor/jszip.min.js"></script>
+<script src="vendor/three.min.js"></script>
 <script src="tables.js"></script>
 <script src="core.js"></script>
 <script src="seed.js"></script>
+<script src="viewer.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

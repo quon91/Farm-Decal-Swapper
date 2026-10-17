@@ -163,6 +163,26 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .fileview textarea{width:100%;min-height:60vh;resize:vertical;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:12px;font-family:var(--f-mono);font-size:.8rem;line-height:1.5;tab-size:4;white-space:pre;overflow:auto}
 .fileview .err{color:var(--bad);font-size:.85rem}
 
+/* ---- place logos (3D) ---- */
+.place{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
+@media (max-width:980px){.place{grid-template-columns:minmax(0,1fr)}}
+.viewwrap{position:relative;height:min(70vh,640px);min-height:340px;border-radius:var(--r);overflow:hidden;border:1px solid var(--line)}
+.viewwrap canvas{width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+.viewhint{position:absolute;left:10px;bottom:10px;font-size:.75rem;background:color-mix(in srgb,var(--surface) 85%,transparent);color:var(--muted);padding:.25em .6em;border-radius:6px;pointer-events:none}
+.viewstatus{position:absolute;inset:0;display:grid;place-items:center;background:color-mix(in srgb,var(--surface) 80%,transparent);font-size:.9rem;color:var(--muted);text-align:center;padding:20px}
+.placeside{display:flex;flex-direction:column;gap:14px;min-width:0}
+.placeside select{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:.4em .6em;width:100%}
+.stickedit{display:flex;flex-direction:column;gap:12px;background:var(--surface);border:1px solid var(--accent);border-radius:var(--r);padding:12px}
+.row-between{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.nudge{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.nudge select{width:auto;padding:.25em .4em}
+.stickers{display:flex;flex-direction:column;gap:6px}
+.stick{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;align-items:center;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px;cursor:pointer}
+.stick[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft)}
+.stick img{width:64px;height:32px;object-fit:contain}
+.stick .t{font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stick .m{font-size:.72rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---- library ---- */
 .libgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
 .libcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column}

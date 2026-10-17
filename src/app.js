@@ -80,8 +80,8 @@ document.querySelectorAll('.nav').forEach(b => b.addEventListener('click', () =>
 function setTab(t) {
   S.tab = t;
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
-  for (const id of ['logos', 'options', 'textures', 'files']) $('tab-' + id).hidden = id !== t;
-  if (t === 'textures') renderAll(); if (t === 'logos') renderLikely(); if (t === 'files') renderFiles();
+  for (const id of ['logos', 'place', 'options', 'textures', 'files']) $('tab-' + id).hidden = id !== t;
+  if (t === 'textures') renderAll(); if (t === 'logos') renderLikely(); if (t === 'files') renderFiles(); if (t === 'place') initPlace();
 }
 document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 
@@ -178,7 +178,8 @@ async function loadMod(zip, name, path, kind) {
     const ic = t.match(/<iconFilename>\s*([^<]+?)\s*<\/iconFilename>/i); if (ic) icon = files.get(Core.normPath(ic[1].replace(/\.(png|tga)$/i, '.dds'))) || null;
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
-  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null };
+  if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null;
+  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], models: listModels(files), place: null };
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);
@@ -186,7 +187,7 @@ async function loadMod(zip, name, path, kind) {
   $('cntOptions').textContent = analysis.groups.length || ''; $('cntTex').textContent = analysis.textures.length; $('cntFiles').textContent = entries.length;
   renderOpts(); setView('mod'); setTab(analysis.textures.some(isLikely) || !analysis.groups.length ? 'logos' : 'options'); updateChanges();
 }
-$('btnCloseMod').onclick = () => { if (changeCount() && !confirmDiscard()) return; S.mod = null; $('navMod').hidden = true; setView('mods'); };
+$('btnCloseMod').onclick = () => { if (changeCount() && !confirmDiscard()) return; if (S.viewer) { S.viewer.dispose(); S.viewer = null; } S.mod = null; $('navMod').hidden = true; setView('mods'); };
 window.addEventListener('beforeunload', e => { if (S.mod && changeCount() && !APP) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ================= logo library ================= */
@@ -253,7 +254,7 @@ function renderLib() {
     box.appendChild(el);
   });
 }
-function refreshLogos() { if (S.mod) { renderOpts(); repaintCards(); updateChanges(); } if (S.current) { refreshEditorLogos(); drawEditor(); } }
+function refreshLogos() { if (S.mod) { renderOpts(); repaintCards(); updateChanges(); if (S.mod.place) { fillPlaceLogos(); drawStickers(); } } if (S.current) { refreshEditorLogos(); drawEditor(); } }
 
 /* ---- library packs (zip of PNGs + names) ---- */
 $('btnExportPack').onclick = async () => {
@@ -662,18 +663,181 @@ async function openFile(rel) {
   acts.append(revert, apply); view.append(ta, err);
 }
 
+/* ================= place logos (3D) ================= */
+function listModels(files) { // i3d files with the store name that uses them
+  const out = [], names = new Map();
+  for (const [p, u8] of files) if (/\.xml$/i.test(p)) {
+    let t; try { t = new TextDecoder().decode(u8); } catch (e) { continue; }
+    const fn = t.match(/<filename>\s*([^<]+?\.i3d)\s*<\/filename>/i), nm = t.match(/<storeData>[\s\S]*?<name>\s*(?:<en>)?\s*([^<$][^<]*?)\s*</);
+    if (fn) { const rel = Core.normPath(fn[1]); if (files.has(rel) && !names.has(rel)) names.set(rel, nm ? nm[1] : null); }
+  }
+  for (const p of files.keys()) if (/\.i3d$/i.test(p) && files.has(p + '.shapes')) out.push({ path: p, name: names.get(p) || null, main: names.has(p) });
+  return out.sort((a, b) => (b.main - a.main) || (files.get(b.path + '.shapes').length - files.get(a.path + '.shapes').length));
+}
+function initPlace() {
+  const M = S.mod; if (!M) return;
+  if (!M.models.length) { $('viewStatus').hidden = false; $('viewStatus').textContent = 'This mod has no 3D models the app can read.'; return; }
+  if (!S.viewer) {
+    if (!window.THREE || !window.FDSViewer) { $('viewStatus').hidden = false; $('viewStatus').textContent = 'The 3D view couldn’t start (3D library missing).'; return; }
+    try { S.viewer = FDSViewer($('view3d')); } catch (e) { $('viewStatus').hidden = false; $('viewStatus').textContent = 'The 3D view couldn’t start on this computer: ' + e.message; return; }
+    S.viewer.onPick = placeAt; S.viewer.onSelect = id => selectSticker(id);
+    S.viewer.setBackground(getComputedStyle(document.documentElement).getPropertyValue('--check-a').trim() || '#d9ded3');
+  }
+  const sel = $('placeModel'); sel.innerHTML = '';
+  for (const m of M.models) { const o = document.createElement('option'); o.value = m.path; o.textContent = (m.name ? m.name + ' · ' : '') + baseName(m.path); sel.appendChild(o); }
+  $('fPlaceModel').hidden = M.models.length < 2;
+  if (!M.place) M.place = { i3d: M.models[0].path, sel: null }; sel.value = M.place.i3d;
+  fillPlaceLogos(); loadModel(M.place.i3d);
+}
+$('placeModel').addEventListener('change', e => { S.mod.place.i3d = e.target.value; S.mod.place.sel = null; loadModel(e.target.value); });
+let loadedModel = null;
+async function loadModel(i3d) {
+  const M = S.mod; if (loadedModel === M.name + '|' + i3d && S.viewer) { drawStickers(); return; }
+  const st = $('viewStatus'); st.hidden = false; st.textContent = 'Reading the 3D model…'; await tick(); await tick();
+  try {
+    const text = new TextDecoder().decode(M.files.get(i3d)).replace(/^﻿/, '');
+    const shapes = Core.readAllShapes(M.files.get(i3d + '.shapes'));
+    await S.viewer.load({ i3dPath: i3d, text, shapes, files: M.files });
+    loadedModel = M.name + '|' + i3d; st.hidden = true; drawStickers();
+  } catch (e) { st.textContent = 'This model couldn’t be shown: ' + e.message; }
+}
+function fillPlaceLogos() {
+  const sel = $('placeLogo'), cur = sel.value; sel.innerHTML = '';
+  if (!S.lib.length) { const o = document.createElement('option'); o.textContent = 'Add logos in the Logo library first'; sel.appendChild(o); sel.disabled = true; return; }
+  sel.disabled = false; for (const l of S.lib) { const o = document.createElement('option'); o.value = l.id; o.textContent = l.name; sel.appendChild(o); }
+  const st = selected(); sel.value = st ? st.logo : (S.lib.some(l => l.id === cur) ? cur : S.lib[0].id);
+}
+const selected = () => S.mod && S.mod.place && S.mod.stickers.find(x => x.id === S.mod.place.sel) || null;
+$('placeLogo').addEventListener('change', e => { const st = selected(); if (st) { st.logo = e.target.value; drawStickers(); updateChanges(); } });
+const V = { sub: (a, b) => a.map((v, i) => v - b[i]), add: (a, b) => a.map((v, i) => v + b[i]), mul: (a, k) => a.map(v => v * k), dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], norm: a => { const l = Math.hypot(...a) || 1; return a.map(v => v / l); } };
+function frameOf(normal, rotDeg) { // right/up directions on the surface; text reads normally from outside
+  const n = V.norm(normal), ref = Math.abs(n[1]) > 0.92 ? [0, 0, 1] : [0, 1, 0];
+  let r = V.norm(V.cross(ref, n)), u = V.cross(n, r);
+  const a = rotDeg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  return { n, r: V.add(V.mul(r, c), V.mul(u, s)), u: V.sub(V.mul(u, c), V.mul(r, s)) };
+}
+function cornersOf(p, rotDeg, width, aspect, normal) {
+  const f = frameOf(normal, rotDeg), h = width / aspect, c = V.add(p, V.mul(f.n, 0.004)), hw = V.mul(f.r, width / 2), hh = V.mul(f.u, h / 2);
+  return [V.sub(V.sub(c, hw), hh), V.sub(V.add(c, hw), hh), V.add(V.add(c, hw), hh), V.add(V.sub(c, hw), hh)];
+}
+function logoAspect(id) { const l = logoById(id); return l ? l.canvas.width / l.canvas.height : 2; }
+function updateTwin(st) {
+  st.twin = null; if (!st.mirror || !S.viewer) return;
+  if (Math.abs(st.point[0]) < 0.05) { st.twinNote = 'This sticker is on the centre line, so there’s no other side.'; return; }
+  const p = [-st.point[0], st.point[1], st.point[2]], n = [-st.normal[0], st.normal[1], st.normal[2]];
+  const hit = S.viewer.castAt(V.add(p, V.mul(n, 0.25)), V.mul(n, -1), 0.6);
+  if (!hit) { st.twinNote = 'No matching surface found on the other side.'; return; }
+  st.twin = { point: hit.point, normal: n, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId) }; st.twinNote = '';
+}
+function placeAt(hit) {
+  if (!S.lib.length) { toast('Add a logo to your Logo library first.'); return; }
+  const M = S.mod, logo = $('placeLogo').value;
+  const st = { id: 'st' + Date.now().toString(36), i3d: M.place.i3d, logo, point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId), width: 0.6, rot: 0, mirror: false, twin: null, twinNote: '' };
+  M.stickers.push(st); M.place.sel = st.id; drawStickers(); updateChanges();
+  toast(`Sticker placed on “${hit.name || 'part'}”. Adjust its size and position on the right.`);
+}
+function selectSticker(id) { S.mod.place.sel = id; drawStickers(); }
+function drawStickers() {
+  const M = S.mod; if (!M || !M.place || !S.viewer) return;
+  const here = M.stickers.filter(st => st.i3d === M.place.i3d), list = [];
+  for (const st of here) {
+    const l = logoById(st.logo); if (!l) continue; const asp = logoAspect(st.logo);
+    list.push({ id: st.id, corners: cornersOf(st.point, st.rot, st.width, asp, st.normal), logo: l.canvas, selected: st.id === M.place.sel });
+    if (st.twin) list.push({ id: st.id, corners: cornersOf(st.twin.point, -st.rot, st.width, asp, st.twin.normal), logo: l.canvas, selected: st.id === M.place.sel });
+  }
+  S.viewer.setStickers(list);
+  // side panel
+  const st = selected(), ed = $('stickerEdit'); ed.hidden = !st;
+  if (st) {
+    $('stWidth').value = st.width; $('stWidthV').textContent = st.width.toFixed(2) + ' m'; $('stRot').value = st.rot; $('stRotV').textContent = st.rot + '°';
+    $('stMirror').checked = st.mirror; $('placeLogo').value = st.logo;
+    $('stInfo').textContent = `On “${st.name || 'part'}”` + (st.twin ? ` and “${st.twin.name || 'part'}”` : '') + (st.twinNote ? '. ' + st.twinNote : '.');
+  }
+  const box = $('stickerList'); box.innerHTML = '';
+  if (!here.length) { box.innerHTML = '<div class="empty">No stickers yet. Pick a logo above, then click the model where it should go.</div>'; return; }
+  for (const x of here) {
+    const l = logoById(x.logo), b = document.createElement('button'); b.type = 'button'; b.className = 'stick'; b.setAttribute('aria-pressed', x.id === M.place.sel);
+    b.innerHTML = '<img alt=""><div style="min-width:0"><div class="t"></div><div class="m"></div></div>';
+    if (l) b.querySelector('img').src = thumbURL(l.canvas); b.querySelector('.t').textContent = l ? l.name : 'Missing logo';
+    b.querySelector('.m').textContent = `${x.width.toFixed(2)} m on ${x.name || 'part'}${x.twin ? ' · both sides' : ''}`;
+    b.onclick = () => { selectSticker(x.id); S.viewer.focus(x.point); };
+    box.appendChild(b);
+  }
+}
+$('stWidth').addEventListener('input', e => { const st = selected(); if (!st) return; st.width = +e.target.value; drawStickers(); });
+$('stRot').addEventListener('input', e => { const st = selected(); if (!st) return; st.rot = +e.target.value; drawStickers(); });
+$('stMirror').addEventListener('change', e => { const st = selected(); if (!st) return; st.mirror = e.target.checked; updateTwin(st); drawStickers(); updateChanges(); });
+$('stDelete').onclick = () => { const M = S.mod, st = selected(); if (!st) return; M.stickers = M.stickers.filter(x => x !== st); M.place.sel = null; drawStickers(); updateChanges(); };
+document.querySelectorAll('.nudge [data-n]').forEach(b => b.onclick = () => {
+  const st = selected(); if (!st) return; const [dx, dy] = b.dataset.n.split(',').map(Number), step = +$('stStep').value, f = frameOf(st.normal, st.rot);
+  const p = V.add(st.point, V.add(V.mul(f.r, dx * step), V.mul(f.u, dy * step)));
+  const hit = S.viewer.castAt(V.add(p, V.mul(f.n, 0.2)), V.mul(f.n, -1), 0.4); // stay on the surface
+  if (hit) { st.point = hit.point; st.nodeId = hit.nodeId; st.name = hit.name; st.parentM = S.viewer.worldMatrixOf(hit.nodeId); } else st.point = p;
+  updateTwin(st); drawStickers();
+});
+/** Write stickers into one model: new shapes, a material + texture per logo, and Shape nodes under the parts they sit on. */
+async function buildStickers(i3d, list) {
+  const M = S.mod, shapesPath = i3d + '.shapes', files = [];
+  let text = M.textEdits.get(i3d) || new TextDecoder().decode(M.files.get(i3d)).replace(/^﻿/, '');
+  const doc = Core.parseXML(text), root = Core.find(doc, 'i3D') || doc;
+  const all = Core.findAll(root, () => true), nl = text.includes('\r\n') ? '\r\n' : '\n';
+  let maxFile = 0, maxMat = 0, maxNode = 0;
+  for (const e of all) { if (e.tag === 'File') maxFile = Math.max(maxFile, +e.attrs.fileId || 0); if (e.tag === 'Material') maxMat = Math.max(maxMat, +e.attrs.materialId || 0); if (e.attrs.nodeId) maxNode = Math.max(maxNode, +e.attrs.nodeId || 0); }
+  const filesEl = Core.find(root, 'Files'), matsEl = Core.find(root, 'Materials');
+  if (!filesEl || filesEl.closeStart == null || !matsEl || matsEl.closeStart == null) throw new Error(baseName(i3d) + ' has no Files or Materials section');
+  const lineStart = at => text.lastIndexOf('\n', at - 1) + 1, indentAt = at => text.slice(lineStart(at), at).match(/^[ \t]*/)[0];
+  const ops = [];
+  // one texture + material per logo
+  const matFor = new Map();
+  for (const id of [...new Set(list.map(st => st.logo))]) {
+    const l = logoById(id), W = hdOn() ? 2048 : 1024; let H = 1; while (H * 2 <= W / (l.canvas.width / l.canvas.height) * 1.4) H *= 2; H = Math.max(64, H);
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(l.canvas, 0, 0, W, H); // the sticker's shape restores the proportions
+    const tex = `custom_decals/${Core.slug(l.name).toLowerCase()}_sticker.dds`;
+    files.push({ rel: tex, data: Core.encodeDDS(g.getImageData(0, 0, W, H).data, W, H, quality()) });
+    const fid = ++maxFile, mid = ++maxMat; matFor.set(id, mid);
+    const fi = indentAt(filesEl.closeStart) + '  ', mi = indentAt(matsEl.closeStart) + '  ';
+    ops.push({ at: lineStart(filesEl.closeStart), del: 0, text: `${fi}<File fileId="${fid}" filename="${Core.relPath(i3d, tex)}"/>${nl}` });
+    ops.push({ at: lineStart(matsEl.closeStart), del: 0, text: `${mi}<Material name="fds_${Core.slug(l.name).toLowerCase()}" materialId="${mid}" alphaBlending="true">${nl}${mi}  <Texture fileId="${fid}"/>${nl}${mi}</Material>${nl}` });
+  }
+  // geometry
+  let sid = Math.max(Core.maxShapeId(M.files.get(shapesPath)), ...Core.findAll(root, e => e.tag === 'Shape').map(e => +e.attrs.shapeId || 0));
+  const entities = [], children = new Map(); let k = 0;
+  const addOne = (st, point, normal, rot, nodeId, parentM) => {
+    const inv = new THREE.Matrix4().fromArray(parentM).invert();
+    const corners = cornersOf(point, rot, st.width, logoAspect(st.logo), normal).map(c => new THREE.Vector3(...c).applyMatrix4(inv).toArray());
+    const id = ++sid, name = `fds_sticker_${++k}`;
+    entities.push(version => Core.buildShapeEntity({ name, shapeId: id, verts: corners, tris: [0, 1, 2, 0, 2, 3], uvs: [[0, 0], [1, 0], [1, 1], [0, 1]], version }));
+    if (!children.has(nodeId)) children.set(nodeId, []);
+    children.get(nodeId).push(`<Shape name="${name}" shapeId="${id}" castsShadows="false" receiveShadows="true" decalLayer="1" clipDistance="150" nodeId="${++maxNode}" materialIds="${matFor.get(st.logo)}"/>`);
+  };
+  for (const st of list) { addOne(st, st.point, st.normal, st.rot, st.nodeId, st.parentM); if (st.twin) addOne(st, st.twin.point, st.twin.normal, -st.rot, st.twin.nodeId, st.twin.parentM); }
+  for (const [nodeId, kidsXml] of children) {
+    const el = Core.findAll(root, e => e.tag === 'Shape' && e.attrs.nodeId === nodeId)[0]; if (!el) throw new Error('part ' + nodeId + ' not found');
+    const ind = indentAt(el.start);
+    if (el.closeStart != null) ops.push({ at: lineStart(el.closeStart), del: 0, text: kidsXml.map(x => ind + '  ' + x + nl).join('') });
+    else { const slash = text.lastIndexOf('/>', el.end); ops.push({ at: slash, del: 2, text: '>' + nl + kidsXml.map(x => ind + '  ' + x + nl).join('') + ind + '</Shape>' }); }
+  }
+  for (const op of ops.sort((a, b) => b.at - a.at)) text = text.slice(0, op.at) + op.text + text.slice(op.at + op.del);
+  files.push({ rel: shapesPath, data: Core.appendShapeEntities(M.files.get(shapesPath), entities) });
+  return { files, i3dText: text };
+}
+
 /* ================= changes + saving ================= */
 function plan() {
-  if (!S.mod) return { tex: [], grp: [], txt: [] };
+  if (!S.mod) return { tex: [], grp: [], txt: [], stk: [] };
   const tex = [...S.mod.edits.entries()].filter(([, e]) => e.regions.some(r => r.on) && (e.mode !== 'image' || e.image) && (e.mode !== 'logo' || S.lib.length));
   const grp = S.mod.analysis.groups.filter(g => { const st = S.mod.groups.get(groupKey(g)); return st && st.on && st.logos.length; });
   const txt = [...S.mod.textEdits.entries()];
-  return { tex, grp, txt };
+  const stk = S.mod.stickers.filter(st => logoById(st.logo));
+  return { tex, grp, txt, stk };
 }
-function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length; }
+function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length; }
 function updateChanges() {
-  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), n = p.tex.length + nOpt + p.txt.length;
-  const parts = []; if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`);
+  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0); let n = p.tex.length + nOpt + p.txt.length + p.stk.length;
+  $('cntStickers').textContent = p.stk.length ? p.stk.length : '';
+  const nSt = p.stk.reduce((a, st) => a + 1 + (st.twin ? 1 : 0), 0);
+  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`);
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
 }
@@ -706,6 +870,14 @@ async function saveMod() {
         }
       }
       textOut.set(xml, src);
+    }
+    // stickers: new geometry + material + texture per model file
+    const byI3d = new Map(); for (const st of plan().stk) { if (!byI3d.has(st.i3d)) byI3d.set(st.i3d, []); byI3d.get(st.i3d).push(st); }
+    for (const [i3d, list] of byI3d) {
+      if (textOut.has(i3d)) { say(`Skipped stickers on ${i3d}: you edited that file by hand. Revert it in Files to add stickers.`); await new Promise(r => setTimeout(r, 1500)); continue; }
+      say(`Adding ${list.length} sticker${list.length === 1 ? '' : 's'} to ${baseName(i3d)}…`); await tick();
+      const res = await buildStickers(i3d, list);
+      changed.push(...res.files); textOut.set(i3d, res.i3dText);
     }
     for (const [rel, s] of textOut) { const raw = M.files.get(rel) || await z.file(P + rel).async('uint8array'); const bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF; changed.push({ rel, data: new TextEncoder().encode((bom ? '﻿' : '') + s) }); }
 

@@ -7,7 +7,9 @@ Farm Decal Swapper includes or is derived from the following open-source work.
 | [JSZip](https://github.com/Stuk/jszip) 3.10.1 (`src/vendor/jszip.min.js`) | Reading and writing mod zips | MIT (dual MIT / GPLv3; used under MIT) |
 | [I3DShapesTool](https://github.com/Donkie/I3DShapesTool) by Daniel Hultgren | The `.i3d.shapes` cipher key table and algorithm in `src/tables.js` / `src/core.js` were ported from its C# source | MIT |
 | [bcdec](https://github.com/iOrange/bcdec) by Sergii Kudlai | BC7 partition tables in `src/tables.js`; the BC7 decoder in `src/core.js` follows its structure | MIT / Unlicense (dual) |
+| [three.js](https://threejs.org/) r147 (`src/vendor/three.min.js`) | The 3D view for placing stickers | MIT |
 | [yauzl](https://github.com/thejoshwolfe/yauzl) | Reading mod icons and titles from zips in the mods folder | MIT |
+| [I3D Blender exporter](https://github.com/StjerneIdioten/I3D-Blender-Addon) | Reference for the i3d rotation order (no code copied) | — |
 | [Electron](https://www.electronjs.org/) | Desktop app shell | MIT |
 | Zilla Slab, Public Sans, JetBrains Mono (via [Fontsource](https://fontsource.org/)) | Bundled interface fonts in `src/fonts/` | SIL Open Font License 1.1 |
 
