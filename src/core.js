@@ -617,6 +617,60 @@ function addConfigOption(src, group, name, texPath, makeDefault) {
   return src.slice(0, lineStart) + block + src.slice(lineStart);
 }
 
+/* ================= names shown in the shop ================= */
+const unesc = s => String(s).replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+const escText = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** English texts a mod defines in modDesc.xml (<l10n><text name="key"><en>…</en>). */
+function modTexts(modDescSrc) {
+  const out = new Map(); if (!modDescSrc) return out;
+  const re = /<text\s+name="([^"]+)"\s*>([\s\S]*?)<\/text>/g; let m;
+  while ((m = re.exec(modDescSrc))) { const en = m[2].match(/<en>([\s\S]*?)<\/en>/); out.set(m[1], unesc((en ? en[1] : m[2]).trim())); }
+  return out;
+}
+/** Choices in one configuration set: [{ index, name (raw attribute), diffuse: [texture paths] }]. */
+function configItems(src, tag) {
+  const doc = parseXML(src), set = findAll(doc, e => e.tag === tag)[0]; if (!set) return [];
+  return kids(set, tag.slice(0, -1)).map((it, index) => ({ index, name: unesc(it.attrs.name || ''),
+    diffuse: findAll(it, e => e.tag === 'textures' && e.attrs.diffuse).map(e => e.attrs.diffuse) }));
+}
+/** Rename choices in a configuration set. renames: Map(index -> new name). Only the name attribute changes. */
+function renameConfigItems(src, tag, renames) {
+  const doc = parseXML(src), set = findAll(doc, e => e.tag === tag)[0]; if (!set) return src;
+  const items = kids(set, tag.slice(0, -1)), edits = [];
+  for (const [index, name] of renames) {
+    const it = items[index]; if (!it) continue;
+    const head = src.slice(it.start, src.indexOf('>', it.start) + 1), m = head.match(/(\sname\s*=\s*)("[^"]*"|'[^']*')/);
+    if (m) edits.push({ at: it.start + m.index + m[1].length, del: m[2].length, text: '"' + escAttr(name) + '"' });
+    else { const at = it.start + 1 + it.tag.length; edits.push({ at, del: 0, text: ` name="${escAttr(name)}"` }); }
+  }
+  let out = src; for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.text + out.slice(e.at + e.del);
+  return out;
+}
+/** The shop name of a store item: { raw, text } where raw may be plain text, per-language tags, or a $l10n_ key. */
+function storeName(src, texts = new Map()) {
+  const sd = src.match(/<storeData>[\s\S]*?<\/storeData>/); if (!sd) return null;
+  const m = sd[0].match(/<name>([\s\S]*?)<\/name>/); if (!m) return null;
+  const raw = m[1].trim(), en = raw.match(/<en>([\s\S]*?)<\/en>/);
+  let text = unesc((en ? en[1] : raw).trim());
+  if (text.startsWith('$l10n_')) text = texts.get(text.slice(6)) || text;
+  return { raw, text };
+}
+function setStoreName(src, name) {
+  const sd = src.match(/<storeData>[\s\S]*?<\/storeData>/); if (!sd) return src;
+  const at = sd.index + sd[0].search(/<name>/); if (at < sd.index) return src;
+  const end = src.indexOf('</name>', at) + 7;
+  return src.slice(0, at) + '<name>' + escText(name) + '</name>' + src.slice(end);
+}
+/** Add " (tag)" to a mod's title in modDesc.xml, in every language, so a separate copy is easy to tell apart. */
+function tagModTitle(src, tag) {
+  const m = src.match(/<title>([\s\S]*?)<\/title>/); if (!m) return src;
+  const suffix = ` (${escText(tag)})`;
+  let inner = m[1];
+  if (/<[a-z]{2}>/.test(inner)) inner = inner.replace(/<([a-z]{2})>([\s\S]*?)<\/\1>/g, (all, l, t) => t.includes(suffix) ? all : `<${l}>${t.trimEnd()}${suffix}</${l}>`);
+  else if (!inner.includes(suffix)) inner = inner.trimEnd() + suffix;
+  return src.slice(0, m.index) + '<title>' + inner + '</title>' + src.slice(m.index + m[0].length);
+}
+
 /* ================= adding new geometry (stickers) ================= */
 /**
  * Build the plain (unencrypted) bytes of a one-material shape for an .i3d.shapes file (format version 10).
@@ -802,7 +856,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

@@ -59,6 +59,9 @@ function initSettings() {
   document.querySelectorAll('input[name=q]').forEach(i => i.addEventListener('change', () => { store.set('quality', quality()); if (S.current) syncEditor(); }));
   $('hd').addEventListener('change', () => { store.set('hd', hdOn() ? '1' : '0'); if (S.current) syncEditor(); });
   $('backup').addEventListener('change', () => store.set('backup', $('backup').checked ? '1' : '0'));
+  $('saveCopy').checked = store.get('saveCopy') === '1'; $('copyTag').value = store.get('copyTag') || 'Custom';
+  $('saveCopy').addEventListener('change', () => { store.set('saveCopy', $('saveCopy').checked ? '1' : '0'); showCopyName(); });
+  $('copyTag').addEventListener('input', () => { store.set('copyTag', $('copyTag').value); showCopyName(); });
   if (APP) {
     $('setBackup').hidden = false; $('setFolder').hidden = false; $('btnFolder').hidden = false;
     APP.backupDir().then(p => $('backupPath').textContent = p);
@@ -81,7 +84,7 @@ function setTab(t) {
   S.tab = t;
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
   for (const id of ['logos', 'place', 'options', 'textures', 'files']) $('tab-' + id).hidden = id !== t;
-  if (t === 'textures') renderAll(); if (t === 'logos') renderLikely(); if (t === 'files') renderFiles(); if (t === 'place') initPlace();
+  if (t === 'textures') renderAll(); if (t === 'logos') renderLikely(); if (t === 'files') renderFiles(); if (t === 'place') initPlace(); if (t === 'options') renderOpts();
 }
 document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 
@@ -179,13 +182,13 @@ async function loadMod(zip, name, path, kind) {
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
   if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null; weldCache = new Map(); partCache = new Map();
-  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], models: listModels(files), place: null };
+  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map() };
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);
   $('navMod').hidden = false; $('navModName').textContent = title; $('saveMsg').hidden = true;
   $('cntOptions').textContent = analysis.groups.length || ''; $('cntTex').textContent = analysis.textures.length; $('cntFiles').textContent = entries.length;
-  renderOpts(); setView('mod'); setTab(analysis.textures.some(isLikely) || !analysis.groups.length ? 'logos' : 'options'); updateChanges();
+  renderOpts(); showCopyName(); setView('mod'); setTab(analysis.textures.some(isLikely) || !analysis.groups.length ? 'logos' : 'options'); updateChanges();
 }
 $('btnCloseMod').onclick = () => { if (changeCount() && !confirmDiscard()) return; if (S.viewer) { S.viewer.dispose(); S.viewer = null; } S.mod = null; $('navMod').hidden = true; setView('mods'); };
 window.addEventListener('beforeunload', e => { if (S.mod && changeCount() && !APP) { e.preventDefault(); e.returnValue = ''; } });
@@ -467,11 +470,53 @@ function repaintCards() { document.querySelectorAll('.tex[data-path]').forEach(p
 
 /* ================= shop options ================= */
 const groupKey = g => g.xml + '|' + g.tag + '|' + g.slot;
+/* ---- names shown in the shop ---- */
+const xmlText = rel => S.mod.textEdits.get(rel) || new TextDecoder().decode(S.mod.files.get(rel)).replace(/^\uFEFF/, '');
+function modDescPath() { return [...S.mod.files.keys()].find(k => /^moddesc\.xml$/i.test(k)); }
+function texts() { const M = S.mod; if (!M._texts) { const p = modDescPath(); M._texts = Core.modTexts(p ? xmlText(p) : ''); } return M._texts; }
+function storeItems() { // every shop item in the mod with its current shop name
+  const M = S.mod; if (M._stores) return M._stores;
+  M._stores = [...M.files.keys()].filter(k => /\.xml$/i.test(k) && !/moddesc\.xml$/i.test(k)).map(xml => { let n = null; try { const t = xmlText(xml); if (t.includes('<storeData>')) n = Core.storeName(t, texts()); } catch (e) {} return n && { xml, name: n }; }).filter(Boolean);
+  return M._stores;
+}
+const shownName = raw => raw.startsWith('$l10n_') ? (texts().get(raw.slice(6)) || human(raw)) : raw.replace(/_/g, ' ');
+/** Choices whose picture you replaced with a logo are named after that logo unless you typed a name. */
+function autoName(it) {
+  for (const d of it.diffuse) { if (d.startsWith('$')) continue; const key = Core.normPath(d).toLowerCase();
+    for (const [path, ed] of S.mod.edits) if (path.toLowerCase() === key && ed.mode === 'logo' && ed.regions.some(r => r.on) && logoById(ed.logo)) return logoById(ed.logo).name; }
+  return null;
+}
+function choiceNames(g) { // [{ it, key, original, auto, value }]
+  let items = []; try { items = Core.configItems(xmlText(g.xml), g.tag); } catch (e) {}
+  return items.map(it => { const key = g.xml + '|' + g.tag + '|' + it.index, original = shownName(it.name), auto = autoName(it), set = S.mod.renames.get(key);
+    return { it, key, original, auto, value: set != null ? set : (auto || original) }; });
+}
+function renamePlan() { // what will change: Map(xml -> { sets: Map(tag -> Map(index -> name)), store: name|null })
+  const out = new Map(), M = S.mod, at = xml => { if (!out.has(xml)) out.set(xml, { sets: new Map(), store: null }); return out.get(xml); };
+  const seen = new Set();
+  for (const g of M.analysis.groups) { if (seen.has(g.xml + '|' + g.tag)) continue; seen.add(g.xml + '|' + g.tag);
+    for (const c of choiceNames(g)) { const v = (c.value || '').trim(); if (v && v !== c.original) { const e = at(g.xml); if (!e.sets.has(g.tag)) e.sets.set(g.tag, new Map()); e.sets.get(g.tag).set(c.it.index, v); } } }
+  for (const [xml, name] of M.storeNames) { const cur = (storeItems().find(s => s.xml === xml) || {}).name; if (name.trim() && cur && name.trim() !== cur.text) at(xml).store = name.trim(); }
+  return out;
+}
 function renderOpts() {
   const box = $('optList'); box.innerHTML = ''; if (!S.mod) return;
   const gs = S.mod.analysis.groups;
-  if (!gs.length) { box.innerHTML = '<div class="empty">This mod has no shop choices that swap a decal. Use <b>Logos &amp; decals</b> or <b>All textures</b> to change its textures directly.</div>'; return; }
-  if (!S.lib.length) { box.innerHTML = '<div class="empty">Add logos to your library first, then tick them here to add them as shop choices.</div>'; return; }
+  // shop names
+  const stores = storeItems();
+  if (stores.length) {
+    const sec = document.createElement('div'); sec.className = 'opts names';
+    sec.innerHTML = '<div class="opthead"><h3>Name in the shop</h3><span class="muted">What the shop calls each vehicle in this mod.</span></div>';
+    for (const s of stores) {
+      const row = document.createElement('label'), inp = document.createElement('input'); row.className = 'namerow';
+      row.innerHTML = '<span class="mono muted"></span>'; row.firstChild.textContent = s.xml;
+      inp.type = 'text'; inp.value = S.mod.storeNames.get(s.xml) ?? s.name.text; inp.setAttribute('aria-label', 'Shop name for ' + s.xml);
+      inp.oninput = () => { if (inp.value.trim() && inp.value.trim() !== s.name.text) S.mod.storeNames.set(s.xml, inp.value); else S.mod.storeNames.delete(s.xml); updateChanges(); };
+      row.appendChild(inp); sec.appendChild(row);
+    }
+    box.appendChild(sec);
+  }
+  if (!gs.length) { box.insertAdjacentHTML('beforeend', '<div class="empty">This mod has no shop choices that swap a decal. Use <b>Logos &amp; decals</b>, <b>Place logos</b> or <b>All textures</b> to change it directly.</div>'); return; }
   const wrap = document.createElement('div'); wrap.className = 'opts';
   gs.forEach((g, i) => {
     const k = groupKey(g); if (!S.mod.groups.has(k)) S.mod.groups.set(k, { on: false, makeDefault: true, logos: [] });
@@ -487,6 +532,23 @@ function renderOpts() {
     const sw = row.querySelector('.switch'), d = row.querySelector('.def'), pick = row.querySelector('.logoPick'), cv = row.querySelector('canvas');
     sw.checked = st.on; d.checked = st.makeDefault;
     const draw = () => { const g2 = cv.getContext('2d'); g2.clearRect(0, 0, cv.width, cv.height); if (st.logos[0]) g2.drawImage(logoInto(cv.width, cv.height, cv.width / cv.height, st.logos[0], 4), 0, 0); cv.style.opacity = st.on && st.logos.length ? 1 : .35; };
+    if (!S.lib.length) pick.innerHTML = '<span class="muted">Add logos to your Logo library first.</span>';
+    // rename the choices that are already there
+    const names = choiceNames(g), det = document.createElement('details'); det.className = 'renames';
+    const changedN = () => names.filter(c => (c.value || '').trim() && c.value.trim() !== c.original).length;
+    const sum = document.createElement('summary'), fillSum = () => { const n = changedN(); sum.textContent = `Rename the ${names.length} existing choice${names.length === 1 ? '' : 's'}` + (n ? ` · ${n} renamed` : ''); };
+    det.appendChild(sum); fillSum();
+    for (const c of names) {
+      const r = document.createElement('div'); r.className = 'namerow';
+      const was = document.createElement('span'); was.className = 'muted'; was.textContent = c.original;
+      const inp = document.createElement('input'); inp.type = 'text'; inp.value = c.value; inp.setAttribute('aria-label', 'New name for ' + c.original);
+      inp.oninput = () => { c.value = inp.value; S.mod.renames.set(c.key, inp.value); fillSum(); updateChanges(); };
+      r.append(was, inp);
+      if (c.auto && c.value === c.auto) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = 'named after your logo'; r.appendChild(t); }
+      det.appendChild(r);
+    }
+    if (names.some(c => c.auto) && names.some(c => c.value !== c.original)) det.open = true;
+    row.querySelector('.what').appendChild(det);
     for (const l of S.lib) {
       const lab = document.createElement('label'), cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = st.logos.includes(l.id);
       cb.onchange = () => { st.logos = S.lib.filter(x => x === l ? cb.checked : st.logos.includes(x.id)).map(x => x.id); if (st.logos.length) st.on = true; sw.checked = st.on; draw(); updateChanges(); };
@@ -873,16 +935,28 @@ function plan() {
   const grp = S.mod.analysis.groups.filter(g => { const st = S.mod.groups.get(groupKey(g)); return st && st.on && st.logos.length; });
   const txt = [...S.mod.textEdits.entries()];
   const stk = S.mod.stickers.filter(st => logoById(st.logo));
-  return { tex, grp, txt, stk };
+  const ren = renamePlan();
+  return { tex, grp, txt, stk, ren };
 }
-function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length; }
+function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += e.store ? 1 : 0; for (const m of e.sets.values()) n += m.size; } return n; }
+function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren); }
 function updateChanges() {
-  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0); let n = p.tex.length + nOpt + p.txt.length + p.stk.length;
+  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames;
   const nSt = p.stk.reduce((a, st) => a + 1 + (st.twin ? 1 : 0), 0);
   $('cntStickers').textContent = nSt || '';
-  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`);
+  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> name${nNames === 1 ? '' : 's'}`);
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
+}
+/* ---- saving as a separate copy (ModHub mods: the game wants to "update" an edited original) ---- */
+const copyTag = () => ($('copyTag').value || '').replace(/[^A-Za-z0-9]+/g, '') || 'Custom';
+function copyName(name) { const base = name.replace(/\.zip$/i, ''), suf = '_' + copyTag(); return (base.toLowerCase().endsWith(suf.toLowerCase()) ? base : base + suf) + '.zip'; }
+const savingCopy = () => !!(S.mod && S.mod.kind !== 'folder' && $('saveCopy').checked);
+function showCopyName() {
+  const M = S.mod, on = M && M.kind !== 'folder'; $('copyOpt').hidden = !on; if (!on) return;
+  $('copyTag').hidden = !$('saveCopy').checked;
+  $('btnSave').textContent = $('saveCopy').checked ? 'Save my copy' : 'Save mod';
+  $('copyOpt').title = $('saveCopy').checked ? `Saves as ${copyName(M.name)} next to the original, so the game treats it as a separate mod and never replaces it with a ModHub update.` : 'Save as a separate mod with its own name, so the game won’t offer to replace it with a ModHub update.';
 }
 $('btnSave').onclick = saveMod;
 async function saveMod() {
@@ -890,7 +964,7 @@ async function saveMod() {
   const say = t => { msg.textContent = t; };
   const M = S.mod, z = M.zip, P = M.prefix, changed = [];
   try {
-    const { tex, grp, txt } = plan(); let i = 0;
+    const { tex, grp, txt, ren } = plan(); let i = 0;
     for (const [path, ed] of tex) {
       say(`Painting ${baseName(path)} (${++i}/${tex.length})…`); await tick();
       const r = Core.decodeDDS(M.files.get(path)), f = ed.mode === 'hide' || ed.mode === 'paint' ? 1 : hdFactor(r.width, r.height), W = r.width * f, H = r.height * f;
@@ -898,8 +972,9 @@ async function saveMod() {
     }
     const textOut = new Map(txt);
     const byXml = new Map(); for (const g of grp) { if (!byXml.has(g.xml)) byXml.set(g.xml, []); byXml.get(g.xml).push(g); }
+    for (const xml of ren.keys()) if (!byXml.has(xml)) byXml.set(xml, []);
     for (const [xml, gs] of byXml) {
-      if (textOut.has(xml)) { say(`Skipped shop choices in ${xml}: you edited that file by hand. Revert it in Files to add choices.`); await new Promise(r => setTimeout(r, 1500)); continue; }
+      if (textOut.has(xml)) { say(`Skipped shop choices and names in ${xml}: you edited that file by hand. Revert it in Files to change them here.`); await new Promise(r => setTimeout(r, 1500)); continue; }
       const raw = M.files.get(xml); let src = new TextDecoder().decode(raw).replace(/^﻿/, '');
       gs.sort((a, b) => b.closeIdx - a.closeIdx);
       for (const g of gs) {
@@ -912,6 +987,9 @@ async function saveMod() {
           src = Core.addConfigOption(src, g, rec.name, texPath, st.makeDefault && k === 0);
         }
       }
+      // renames last: new choices go at the end of a set, so the existing choices keep their positions
+      const rn = ren.get(xml);
+      if (rn) { for (const [tag, m] of rn.sets) src = Core.renameConfigItems(src, tag, m); if (rn.store) src = Core.setStoreName(src, rn.store); }
       textOut.set(xml, src);
     }
     // stickers: new geometry + material + texture per model file
@@ -922,6 +1000,8 @@ async function saveMod() {
       const res = await buildStickers(i3d, list);
       changed.push(...res.files); textOut.set(i3d, res.i3dText);
     }
+    const asCopy = savingCopy(), saveName = asCopy ? copyName(M.name) : M.name;
+    if (asCopy) { const md = modDescPath(); if (md && !textOut.has(md)) textOut.set(md, Core.tagModTitle(xmlText(md), copyTag())); else if (md) textOut.set(md, Core.tagModTitle(textOut.get(md), copyTag())); }
     for (const [rel, s] of textOut) { const raw = M.files.get(rel) || await z.file(P + rel).async('uint8array'); const bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF; changed.push({ rel, data: new TextEncoder().encode((bom ? '﻿' : '') + s) }); }
 
     let result;
@@ -935,11 +1015,15 @@ async function saveMod() {
       let blob;
       try { blob = await z.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } }, m => say(`Packing the zip… ${Math.round(m.percent)}%`)); }
       finally { for (const [rel, orig] of originals) { if (orig) z.file(P + rel, orig); else z.remove(P + rel); } } // keep the open mod pristine for the next save
-      if (APP) result = await APP.saveZip({ path: M.path, name: M.name, data: new Uint8Array(await blob.arrayBuffer()), backup: $('backup').checked });
-      else { const r = await offerFile(M.name, blob, 'zip'); result = r === 'saved' ? { saved: true, name: M.name, size: blob.size } : { canceled: true }; }
+      const savePath = asCopy && M.path ? M.path.replace(/[^\\/]+$/, saveName) : M.path;
+      if (APP) result = await APP.saveZip({ path: savePath, name: saveName, data: new Uint8Array(await blob.arrayBuffer()), backup: $('backup').checked });
+      else { const r = await offerFile(saveName, blob, 'zip'); result = r === 'saved' ? { saved: true, name: saveName, size: blob.size } : { canceled: true }; }
     }
     if (result && result.canceled) { msg.hidden = true; return; }
-    msg.textContent = APP
+    msg.textContent = asCopy
+      ? (APP ? `Saved your own copy to ${result.path}.` : `Saved your own copy as ${saveName}. Put it in your mods folder next to the original.`) +
+        ` The game treats it as a separate mod, so a ModHub update won’t replace it. In the mod list its title ends in “(${copyTag()})”. Buy the vehicle again from your copy (give it its own shop name under Shop options so you can tell the two apart). Vehicles you already own came from the original, so keep the original installed if you want to keep them.`
+      : APP
       ? `Saved to ${result.path}${result.backupPath ? '. The original is backed up in ' + result.backupPath : ''}. Start the game to see it.`
       : `Saved ${M.name}. Put it in your mods folder under the same name, replacing the old one.`;
   } catch (e) { msg.className = 'savemsg err'; msg.textContent = 'Saving failed: ' + cleanErr(e) + (/EBUSY|EPERM|EACCES/.test(String(e && e.message)) ? '. If the game is running, close it and try again.' : ''); }

@@ -30,16 +30,17 @@ The app isn't code-signed, so Windows SmartScreen may say *Windows protected you
 3. **Change it.**
    - **Logos & decals**: click a texture and choose *Logo*, *Picture*, *Hide* or *Colour*. Tick the spots on the model you want to change, or drag a box over any area. Then click **Apply**.
    - **Place logos**: pick a model and a logo, then click the model where you want the logo. Drag to turn the view, right-drag to move it, scroll to zoom. Use the sliders and arrows to size and position it. The logo bends over curves and wraps round corners like vinyl; untick **Wrap round sharp corners** to keep it on one face. Tick **Also put it on the other side** for a matching sticker on the far side.
-   - **Shop options**: tick logos to add them as choices in the vehicle's decal menu.
+   - **Shop options**: rename each vehicle as the shop shows it, rename the existing decal choices, and tick logos to add them as new choices. A choice whose picture you replaced with a logo takes the logo's name automatically.
    - **All textures**: does the same as *Logos & decals*, for every texture in the mod.
    - **Files**: edit XML such as the store name or price, then click **Keep these edits**.
-4. **Save the mod.** The app suggests saving over the original. A backup goes to `Documents\Farm Decal Swapper\Backups` first.
+4. **Save the mod.** The app suggests saving over the original. A backup goes to `Documents\Farm Decal Swapper\Backups` first. For a ModHub mod, tick **As my own copy** next to the Save button (see below).
 5. **Start the game.** New shop choices appear at the end of the list in the configure screen.
 
 ### Good to know
 
 - **Hidden decals that show black in game:** some models don't support see-through on that part. Open the texture again and use **Colour** to match the paint instead.
-- **Placed logos:** each one is a thin sticker that sits 4 mm off the part you clicked, so it moves with that part (a logo on a door opens with the door). It always shows; it isn't a shop choice. On strongly curved parts, keep it small or it may float off the edges.
+- **Placed logos:** each one is a thin sticker that follows the surface 4 mm off the part you clicked, so it moves with that part (a logo on a door opens with the door). It always shows; it isn't a shop choice. It stays on the part you clicked, so a logo that runs past the edge of a door is trimmed there.
+- **ModHub mods say they need an update:** the game compares ModHub mods with the official file, and an edited one no longer matches. Updating it downloads the original over your changes. Tick **As my own copy** and type a short tag (for example your farm's initials): the app saves `ModName_TAG.zip` next to the original and adds the tag to its title, so the game treats it as a separate mod. Buy the vehicle again from your copy. Vehicles you already own came from the original, so keep the original installed to keep them.
 - **Quality:** *Settings → Texture quality* switches between **Best** (no loss, a few MB per logo texture) and **Smaller files** (DXT5).
 - **Moving your library:** **Export pack** saves your logo library as one zip, and **Import pack** loads it on another PC.
 - **Mod authors' work:** patch mods for your own use. Don't re-upload someone else's mod without their permission.

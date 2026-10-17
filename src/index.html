@@ -62,6 +62,7 @@
         <div class="vacts">
           <span class="changes" id="changeSum">No changes yet</span>
           <button type="button" class="btn" id="btnCloseMod">Close</button>
+          <span class="copyopt" id="copyOpt" hidden><label class="check"><input type="checkbox" id="saveCopy"> <span>As my own copy</span></label><input type="text" id="copyTag" class="copytag" maxlength="16" aria-label="Name tag added to your copy" hidden></span>
           <button type="button" class="btn primary" id="btnSave" disabled>Save mod</button>
         </div>
       </header>
@@ -105,7 +106,7 @@
         </div>
       </div>
       <div class="tabpane" id="tab-options" hidden>
-        <p class="lead">Some vehicles let you pick a decal in the shop, like door logos. Tick logos from your library to add each one as a new choice.</p>
+        <p class="lead">Rename what the shop shows, and add your logos as decal choices. A choice whose picture you replaced with a logo is named after that logo automatically; you can type any name instead.</p>
         <div id="optList"></div>
       </div>
       <div class="tabpane" id="tab-textures" hidden>

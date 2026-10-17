@@ -48,4 +48,26 @@ test('i3d rotations compose as Rz * Ry * Rx', () => {
   const v = [0, 1, 0], out = [M[0] * v[0] + M[4] * v[1] + M[8] * v[2], M[1] * v[0] + M[5] * v[1] + M[9] * v[2], M[2] * v[0] + M[6] * v[1] + M[10] * v[2]].map(x => Math.round(x * 1e6) / 1e6 + 0);
   assert.deepStrictEqual(out, [0, 0, 1]); // Rx(90) takes +Y to +Z, then Rz leaves +Z alone
 });
+test('a sticker wraps round a box corner and follows a cylinder', () => {
+  const box = []; const tris = []; // unit cube, 4x4 per face, outward-facing
+  const face = (o, U, V) => { const b = box.length / 3; for (let j = 0; j <= 4; j++) for (let i = 0; i <= 4; i++) box.push(...o.map((c, k) => c + U[k] * i / 4 + V[k] * j / 4));
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) { const a = b + j * 5 + i; tris.push(a, a + 1, a + 6, a, a + 6, a + 5); } };
+  face([-.5, -.5, .5], [1, 0, 0], [0, 1, 0]); face([.5, -.5, -.5], [-1, 0, 0], [0, 1, 0]); face([.5, -.5, .5], [0, 0, -1], [0, 1, 0]);
+  face([-.5, -.5, -.5], [0, 0, 1], [0, 1, 0]); face([-.5, .5, .5], [1, 0, 0], [0, 0, -1]); face([-.5, -.5, -.5], [1, 0, 0], [0, 0, 1]);
+  const m = Core.weldMesh(box, tris), d = Core.wrapDecal(m, { point: [0.4, 0, 0.5], n: [0, 0, 1], r: [1, 0, 0], u: [0, 1, 0], w: 0.6, h: 0.3 });
+  assert.ok(Math.abs(Math.min(...d.verts.filter(v => v[0] > 0.5).map(v => v[2])) - 0.3) < 0.002, 'wraps 0.2 m down the side');
+  const flat = Core.wrapDecal(m, { point: [0.4, 0, 0.5], n: [0, 0, 1], r: [1, 0, 0], u: [0, 1, 0], w: 0.6, h: 0.3, maxBendCos: 0.77 });
+  assert.strictEqual(flat.verts.filter(v => v[2] < 0.495).length, 0, 'with wrapping off it stops at the edge');
+});
+test('shop names: rename a choice, the shop name and tag the mod title', () => {
+  const xml = '<vehicle>\n<storeData>\n    <name>Truck</name>\n</storeData>\n<designConfigurations>\n    <designConfiguration name="Old_Logo" price="0">\n        <material materialSlotName="decal"><textures diffuse="textures/a.dds"/></material>\n    </designConfiguration>\n    <designConfiguration name="Other"/>\n</designConfigurations>\n</vehicle>';
+  const items = Core.configItems(xml, 'designConfigurations');
+  assert.strictEqual(JSON.stringify(items.map(i => i.name)), '["Old_Logo","Other"]'); assert.strictEqual(JSON.stringify(items[0].diffuse), '["textures/a.dds"]');
+  const out = Core.setStoreName(Core.renameConfigItems(xml, 'designConfigurations', new Map([[0, 'Farm & Sons'], [1, 'Plain']])), 'My Truck');
+  assert.strictEqual(JSON.stringify(Core.configItems(out, 'designConfigurations').map(i => i.name)), '["Farm & Sons","Plain"]');
+  assert.ok(out.includes('name="Farm &amp; Sons"') && out.includes('<name>My Truck</name>'));
+  assert.strictEqual(out.split('\n').length, xml.split('\n').length, 'only names change, no lines added or removed');
+  const md = '<modDesc><title>\n  <en>Truck</en>\n  <de>Laster</de>\n</title></modDesc>', tagged = Core.tagModTitle(Core.tagModTitle(md, 'DBF'), 'DBF');
+  assert.ok(tagged.includes('<en>Truck (DBF)</en>') && tagged.includes('<de>Laster (DBF)</de>') && !tagged.includes('(DBF) (DBF)'));
+});
 console.log(`\n${n} tests passed`);
