@@ -2,8 +2,6 @@
 
 Put your farm logo on Farming Simulator 25 mods, swap or hide any texture, and add your own brand choices to the shop. You don't need GIANTS Editor, Blender or an image editor.
 
-
-
 ## What it does
 
 - **Finds the logos for you.** Open a vehicle, trailer or placeable and the app reads its 3D model. It shows which textures are logos or decals, where each one sits, and how big it is in metres.
@@ -16,9 +14,6 @@ Put your farm logo on Farming Simulator 25 mods, swap or hide any texture, and a
 - **Keeps quality high.** By default textures are saved without compression loss, and small decals are enlarged up to 2048 px.
 - **Backs up before saving.** It copies the original mod before saving over it.
 - **Works offline.** Nothing is uploaded, and it needs no account.
-
-
-
 
 ## Install (Windows)
 
@@ -48,9 +43,6 @@ The app isn't code-signed, so Windows SmartScreen may say *Windows protected you
 - **Quality:** *Settings → Texture quality* switches between **Best** (no loss, a few MB per logo texture) and **Smaller files** (DXT5).
 - **Moving your library:** **Export pack** saves your logo library as one zip, and **Import pack** loads it on another PC.
 - **Mod authors' work:** patch mods for your own use. Don't re-upload someone else's mod without their permission.
-
-## Brand logos and trademarks
-
 
 ## License
 
