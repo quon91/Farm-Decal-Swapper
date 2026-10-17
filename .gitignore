@@ -1,0 +1,5 @@
+node_modules/
+dist/
+personal/
+test/out_*
+*.log

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; img-src 'self' file: data: blob:; style-src 'self' file: 'unsafe-inline'; font-src 'self' file:; script-src 'self' file:; connect-src 'self' file: data: blob:">
+<title>Farm Decal Swapper</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <!-- ======= sidebar ======= -->
+  <nav class="side" aria-label="Main">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div><div class="brand-name">Farm Decal Swapper</div><div class="brand-sub">FS25 logos &amp; textures</div></div>
+    </div>
+    <div class="navlist">
+      <button type="button" class="nav" data-view="mods" aria-current="page"><span class="ico ico-mods"></span>Mods</button>
+      <button type="button" class="nav" data-view="mod" id="navMod" hidden><span class="ico ico-open"></span><span class="nav-mod-name" id="navModName">Open mod</span><span class="badge" id="navChanges" hidden></span></button>
+      <button type="button" class="nav" data-view="library"><span class="ico ico-lib"></span>Logo library<span class="badge soft" id="navLibCount"></span></button>
+      <button type="button" class="nav" data-view="settings"><span class="ico ico-set"></span>Settings</button>
+    </div>
+    <div class="side-foot" id="sideFoot">Everything runs on your computer. Your mods are never uploaded.</div>
+  </nav>
+
+  <main class="content">
+    <!-- ======= MODS ======= -->
+    <section class="view" id="view-mods">
+      <header class="vhead">
+        <div><h1>Your mods</h1><p class="muted" id="modsSub">Open a mod to put logos on it, swap textures or hide decals you don’t want.</p></div>
+        <div class="vacts">
+          <button type="button" class="btn" id="btnFolder" hidden>Change folder</button>
+          <button type="button" class="btn primary" id="btnOpenZip">Open a mod zip</button>
+          <input type="file" id="zipIn" accept=".zip,application/zip" hidden>
+        </div>
+      </header>
+      <div class="drop" id="drop">
+        <div class="drop-art" aria-hidden="true"></div>
+        <div class="grow">
+          <span class="big">Drop a mod .zip here</span>
+          <span class="muted">Vehicles, trailers, tools and placeables. The app reads the 3D model to find where every logo sits and how big it is.</span>
+        </div>
+      </div>
+      <div class="status" id="status" hidden></div>
+      <div id="modsFolderBlock" hidden>
+        <div class="toolbar">
+          <span class="mono muted path" id="modsPath"></span>
+          <input type="search" id="modSearch" placeholder="Search mods" aria-label="Search mods">
+        </div>
+        <div class="modgrid" id="modGrid"></div>
+      </div>
+    </section>
+
+    <!-- ======= MOD WORKSPACE ======= -->
+    <section class="view" id="view-mod" hidden>
+      <header class="vhead modhead">
+        <div class="modtitle"><canvas id="modIcon" width="64" height="64" class="checker"></canvas>
+          <div style="min-width:0"><h1 id="modTitle"></h1><p class="mono muted" id="modFile"></p></div></div>
+        <div class="vacts">
+          <span class="changes" id="changeSum">No changes yet</span>
+          <button type="button" class="btn" id="btnCloseMod">Close</button>
+          <button type="button" class="btn primary" id="btnSave" disabled>Save mod</button>
+        </div>
+      </header>
+      <div class="savemsg" id="saveMsg" hidden></div>
+      <div class="tabs" role="tablist" aria-label="Mod sections">
+        <button type="button" role="tab" class="tab" data-tab="logos" aria-selected="true">Logos &amp; decals</button>
+        <button type="button" role="tab" class="tab" data-tab="options" aria-selected="false">Shop options <span class="tcount" id="cntOptions"></span></button>
+        <button type="button" role="tab" class="tab" data-tab="textures" aria-selected="false">All textures <span class="tcount" id="cntTex"></span></button>
+        <button type="button" role="tab" class="tab" data-tab="files" aria-selected="false">Files <span class="tcount" id="cntFiles"></span></button>
+      </div>
+
+      <div class="tabpane" id="tab-logos">
+        <p class="lead">These textures look like logos or decals. Click one to put your logo on it, hide it, or paint over it.</p>
+        <div class="grid" id="gridLikely"></div>
+      </div>
+      <div class="tabpane" id="tab-options" hidden>
+        <p class="lead">Some vehicles let you pick a decal in the shop, like door logos. Tick logos from your library to add each one as a new choice.</p>
+        <div id="optList"></div>
+      </div>
+      <div class="tabpane" id="tab-textures" hidden>
+        <div class="toolbar"><input type="search" id="texSearch" placeholder="Search textures" aria-label="Search textures">
+          <label class="muted" style="display:flex;gap:6px;align-items:center;font-size:.85rem"><input type="checkbox" id="texMaps"> Show normal, gloss and mask maps</label></div>
+        <div class="grid" id="gridAll"></div>
+      </div>
+      <div class="tabpane" id="tab-files" hidden>
+        <div class="files">
+          <div class="filelist" id="fileList" role="listbox" aria-label="Files in this mod"></div>
+          <div class="fileview" id="fileView">
+            <div class="empty">Pick a file on the left. Text files like XML can be edited here; textures open in the texture editor.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======= LIBRARY ======= -->
+    <section class="view" id="view-library" hidden>
+      <header class="vhead">
+        <div><h1>Logo library</h1><p class="muted">Your farm and any brands you want on your equipment. Logos keep their full resolution. The name is what shows in the shop.</p></div>
+        <div class="vacts">
+          <button type="button" class="btn" id="btnImportPack">Import pack</button>
+          <button type="button" class="btn" id="btnExportPack">Export pack</button>
+          <label class="btn primary" for="upLogo">Add logos</label>
+          <input type="file" id="upLogo" accept="image/png,image/webp,image/jpeg,image/svg+xml" multiple hidden>
+          <input type="file" id="packIn" accept=".zip,application/zip" hidden>
+        </div>
+      </header>
+      <div class="libgrid" id="lib"></div>
+      <p class="muted tip">Tip: inside a mod, open any texture, mark a logo with your mouse and choose <b>Add area to library</b>. For JPGs or logos on a solid colour, use <b>Remove background</b>.</p>
+    </section>
+
+    <!-- ======= SETTINGS ======= -->
+    <section class="view" id="view-settings" hidden>
+      <header class="vhead"><div><h1>Settings</h1></div></header>
+      <div class="settings">
+        <div class="set">
+          <h3>Texture quality</h3>
+          <div class="radios">
+            <label><input type="radio" name="q" value="lossless" id="qBest"> <span><b>Best</b>: no quality loss. Logo textures are a few MB each.</span></label>
+            <label><input type="radio" name="q" value="dxt5" id="qSmall"> <span><b>Smaller files</b>: compressed (DXT5). Slight softening up close.</span></label>
+          </div>
+        </div>
+        <div class="set">
+          <h3>Sharpness</h3>
+          <label class="check"><input type="checkbox" id="hd"> <span>Enlarge small decal textures up to 2048 px so logos stay crisp</span></label>
+        </div>
+        <div class="set" id="setBackup" hidden>
+          <h3>Backups</h3>
+          <label class="check"><input type="checkbox" id="backup"> <span>Copy the original mod to a backup folder before saving over it</span></label>
+          <p class="muted mono path" id="backupPath"></p>
+          <button type="button" class="btn small" id="btnOpenBackups">Open backup folder</button>
+        </div>
+        <div class="set" id="setFolder" hidden>
+          <h3>Mods folder</h3>
+          <p class="muted mono path" id="setModsPath"></p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small" id="btnFolder2">Change folder</button><button type="button" class="btn small" id="btnFolderReset">Use the default</button></div>
+        </div>
+        <div class="set">
+          <h3>About</h3>
+          <p class="muted">Farm Decal Swapper <span id="appVer"></span>. Reads FS25 .i3d models and .i3d.shapes geometry, decodes and writes DDS textures. No GIANTS Editor or Blender needed.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ======= texture editor ======= -->
+<div class="overlay" id="editor" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="edTitle">
+    <div class="stage">
+      <div class="bar">
+        <div class="seg" role="group" aria-label="Preview">
+          <button type="button" id="vBefore" aria-pressed="false">Before</button>
+          <button type="button" id="vAfter" aria-pressed="true">After</button>
+        </div>
+        <span class="muted" style="font-size:.8rem">Drag on the texture to mark your own area</span>
+      </div>
+      <div class="canvasWrap checker"><canvas id="edCanvas"></canvas></div>
+      <p class="muted mono" id="edInfo"></p>
+    </div>
+    <div class="side2">
+      <div class="head">
+        <div style="min-width:0"><div class="eyebrow">Texture</div><h2 id="edTitle" class="mono" style="font-size:.92rem;overflow-wrap:anywhere"></h2></div>
+        <button type="button" class="btn small" id="edClose">Cancel</button>
+      </div>
+      <div class="field"><span class="lab">Where</span><div class="spots" id="edSpots"></div></div>
+      <div class="field"><span class="lab">Put there</span>
+        <div class="seg wide" role="group" aria-label="What to put there" id="edMode">
+          <button type="button" data-mode="logo">Logo</button><button type="button" data-mode="image">Picture</button><button type="button" data-mode="hide">Hide</button><button type="button" data-mode="paint">Colour</button>
+        </div>
+        <p class="muted hint" id="edModeHint"></p></div>
+      <div class="field" id="fLogo"><label for="edLogo">Logo</label><select id="edLogo"></select></div>
+      <div class="field" id="fImage"><span class="lab">Picture</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label class="btn small" for="edImgIn">Choose picture…</label><span class="muted" id="edImgName" style="font-size:.8rem"></span></div>
+        <input type="file" id="edImgIn" accept="image/png,image/webp,image/jpeg,image/svg+xml" hidden>
+        <div class="radios" id="edFit">
+          <label><input type="radio" name="fit" value="stretch"> Stretch to fill the area</label>
+          <label><input type="radio" name="fit" value="fit"> Fit inside, keep proportions</label>
+          <label><input type="radio" name="fit" value="cover"> Fill and crop, keep proportions</label>
+        </div></div>
+      <div class="field" id="fPaint"><label for="edPaint">Colour</label><input type="color" id="edPaint" value="#000000" class="colorbig"></div>
+      <div class="field" id="fBg"><span class="lab">Behind the logo</span>
+        <div class="radios" id="edBg">
+          <label><input type="radio" name="bg" value="clear"> Clear the old artwork</label>
+          <label><input type="radio" name="bg" value="fill"> Fill with colour <input type="color" id="edFill" value="#000000" class="colorsmall"></label>
+          <label><input type="radio" name="bg" value="keep"> Keep the old artwork underneath</label>
+        </div></div>
+      <div class="field" id="fMargin"><label for="edMargin">Edge margin <span id="edMarginV" class="mono"></span></label><input type="range" id="edMargin" min="0" max="25" step="1" value="4"></div>
+      <div class="edacts"><button type="button" class="btn primary" id="edApply">Apply</button></div>
+      <div class="edacts">
+        <button type="button" class="btn small" id="edToLib">Add area to library</button>
+        <button type="button" class="btn small" id="edExport">Export as PNG</button>
+        <button type="button" class="btn small" id="edRemove">Undo changes to this texture</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======= background remover ======= -->
+<div class="overlay" id="bgDlg" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="bgTitle">
+    <div class="stage">
+      <div class="bar">
+        <div class="seg" role="group" aria-label="Preview">
+          <button type="button" id="bgBefore" aria-pressed="false">Original</button>
+          <button type="button" id="bgAfter" aria-pressed="true">Result</button>
+        </div>
+        <span class="muted" style="font-size:.8rem">Checkerboard = see-through. Click the picture to pick the background colour.</span>
+      </div>
+      <div class="canvasWrap checker"><canvas id="bgCanvas"></canvas></div>
+      <p class="muted mono" id="bgInfo"></p>
+    </div>
+    <div class="side2">
+      <div class="head"><div style="min-width:0"><div class="eyebrow">Remove background</div><h2 id="bgTitle" style="font-size:1.05rem;overflow-wrap:anywhere"></h2></div></div>
+      <div class="field"><span class="lab">Background colour</span>
+        <div style="display:flex;gap:10px;align-items:center"><span id="bgSwatch" class="swatch"></span><span class="mono" id="bgHex"></span></div></div>
+      <div class="field"><label for="bgTol">How much to remove <span class="mono" id="bgTolV"></span></label><input type="range" id="bgTol" min="2" max="140" value="38"></div>
+      <div class="field"><label for="bgSoft">Edge softness <span class="mono" id="bgSoftV"></span></label><input type="range" id="bgSoft" min="0" max="60" value="18"></div>
+      <label class="check"><input type="checkbox" id="bgHoles"> <span>Also clear enclosed areas of the same colour, like the inside of an O</span></label>
+      <div class="edacts" style="margin-top:auto">
+        <button type="button" class="btn primary" id="bgApply">Use this</button>
+        <button type="button" class="btn" id="bgCancel">Cancel</button>
+        <button type="button" class="btn small" id="bgRestore" hidden>Restore the original image</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="vendor/jszip.min.js"></script>
+<script src="tables.js"></script>
+<script src="core.js"></script>
+<script src="seed.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
