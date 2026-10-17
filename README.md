@@ -29,7 +29,7 @@ The app isn't code-signed, so Windows SmartScreen may say *Windows protected you
 2. **Open a mod.** The **Mods** screen lists your FS25 mods folder (`Documents\My Games\FarmingSimulator2025\mods`). Click a mod, or drop any mod zip on the window.
 3. **Change it.**
    - **Logos & decals**: click a texture and choose *Logo*, *Picture*, *Hide* or *Colour*. Tick the spots on the model you want to change, or drag a box over any area. Then click **Apply**.
-   - **Place logos**: pick a model and a logo, then click the model where you want the logo. Drag to turn the view, right-drag to move it, scroll to zoom. Use the sliders and arrows to size and position it. Tick **Also put it on the other side** for a matching sticker on the far side.
+   - **Place logos**: pick a model and a logo, then click the model where you want the logo. Drag to turn the view, right-drag to move it, scroll to zoom. Use the sliders and arrows to size and position it. The logo bends over curves and wraps round corners like vinyl; untick **Wrap round sharp corners** to keep it on one face. Tick **Also put it on the other side** for a matching sticker on the far side.
    - **Shop options**: tick logos to add them as choices in the vehicle's decal menu.
    - **All textures**: does the same as *Logos & decals*, for every texture in the mod.
    - **Files**: edit XML such as the store name or price, then click **Keep these edits**.

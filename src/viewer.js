@@ -63,7 +63,7 @@ function FDSViewer(canvas) {
   function describeHit(hit, dir) {
     const nm = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
     const n = hit.face.normal.clone().applyMatrix3(nm).normalize(); if (n.dot(dir) > 0) n.negate();
-    return { point: hit.point.toArray(), normal: n.toArray(), nodeId: hit.object.userData.nodeId, name: hit.object.userData.name };
+    return { point: hit.point.toArray(), normal: n.toArray(), nodeId: hit.object.userData.nodeId, name: hit.object.userData.name, face: hit.faceIndex == null ? -1 : hit.faceIndex };
   }
   /** Cast a ray at the model (for mirrored copies and nudging). */
   function castAt(point, dir, maxDist) {
@@ -148,17 +148,38 @@ function FDSViewer(canvas) {
   function setStickers(list) { // [{id, corners:[[x,y,z]x4], logo:canvas, selected}]
     stickerGroup.clear();
     for (const s of list) {
-      if (!s.corners) continue;
+      if (!s.corners && !s.mesh) continue;
       const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.corners.flat()), 3));
-      g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
-      g.setIndex([0, 1, 2, 0, 2, 3]);
+      if (s.mesh) { // wrapped onto the surface
+        g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.mesh.verts.flat()), 3));
+        g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(s.mesh.uvs.flat()), 2)); g.setIndex(s.mesh.tris);
+      } else {
+        g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.corners.flat()), 3));
+        g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2)); g.setIndex([0, 1, 2, 0, 2, 3]);
+      }
       let t = texCache.get(s.logo); if (!t) { t = new THREE.CanvasTexture(s.logo); t.encoding = THREE.sRGBEncoding; t.anisotropy = 8; texCache.set(s.logo, t); }
       const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: t, transparent: true, alphaTest: 0.02, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }));
       m.userData.stickerId = s.id; m.renderOrder = 2; stickerGroup.add(m);
-      if (s.selected) { const e = new THREE.LineLoop(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.corners.flat()), 3)), new THREE.LineBasicMaterial({ color: 0xe5a040 })); e.renderOrder = 3; stickerGroup.add(e); }
+      if (s.selected) {
+        const edge = s.mesh ? new THREE.LineSegments(new THREE.EdgesGeometry(g, 1), new THREE.LineBasicMaterial({ color: 0xe5a040 })) : null;
+        const e = edge || new THREE.LineLoop(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.corners.flat()), 3)), new THREE.LineBasicMaterial({ color: 0xe5a040 }));
+        if (edge) { // only the outline, not every fold: keep edges that belong to one triangle
+          const cnt = new Map(), t = s.mesh.tris, V = s.mesh.verts, k = i => V[i].map(c => Math.round(c * 1e4)).join(','), out = [];
+          for (let i = 0; i < t.length; i += 3) for (const [a, b] of [[t[i], t[i + 1]], [t[i + 1], t[i + 2]], [t[i + 2], t[i]]]) { const ka = k(a), kb = k(b), key = ka < kb ? ka + '|' + kb : kb + '|' + ka; const c = cnt.get(key); cnt.set(key, c ? [c[0] + 1, a, b] : [1, a, b]); }
+          for (const [n, a, b] of cnt.values()) if (n === 1) out.push(...V[a], ...V[b]);
+          e.geometry.dispose(); e.geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(new Float32Array(out), 3));
+        }
+        e.renderOrder = 3; stickerGroup.add(e);
+      }
     }
     needs = true;
+  }
+  /** World-space triangles of one part (for wrapping stickers onto it). */
+  function meshData(nodeId) {
+    const m = meshes.find(x => x.userData.nodeId === nodeId); if (!m || !m.geometry.index) return null;
+    const src = m.geometry.attributes.position, pos = new Float32Array(src.count * 3), v = new THREE.Vector3();
+    for (let i = 0; i < src.count; i++) { v.fromBufferAttribute(src, i).applyMatrix4(m.matrixWorld); pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z; }
+    return { pos, tris: m.geometry.index.array };
   }
   function worldMatrixOf(nodeId) { for (const m of meshes) if (m.userData.nodeId === nodeId) return m.matrixWorld.toArray(); return null; }
   function focus(point) { orbit.target.set(...point); placeCamera(); }
@@ -172,7 +193,7 @@ function FDSViewer(canvas) {
   requestAnimationFrame(frame);
   placeCamera();
   return {
-    load, setStickers, castAt, worldMatrixOf, focus, fit,
+    load, setStickers, castAt, worldMatrixOf, meshData, focus, fit,
     set onPick(f) { onPick = f; }, set onSelect(f) { onSelect = f; }, set onDrag(f) { onDrag = f; },
     get modelSize() { return modelSize; },
     setBackground(c) { bg = c; needs = true; },

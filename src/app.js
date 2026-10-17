@@ -178,7 +178,7 @@ async function loadMod(zip, name, path, kind) {
     const ic = t.match(/<iconFilename>\s*([^<]+?)\s*<\/iconFilename>/i); if (ic) icon = files.get(Core.normPath(ic[1].replace(/\.(png|tga)$/i, '.dds'))) || null;
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
-  if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null;
+  if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null; weldCache = new Map(); partCache = new Map();
   S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], models: listModels(files), place: null };
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
@@ -690,13 +690,13 @@ function initPlace() {
   fillPlaceLogos(); loadModel(M.place.i3d);
 }
 $('placeModel').addEventListener('change', e => { S.mod.place.i3d = e.target.value; S.mod.place.sel = null; loadModel(e.target.value); });
-let loadedModel = null;
+let loadedModel = null, weldCache = new Map(), partCache = new Map();
 async function loadModel(i3d) {
   const M = S.mod; if (loadedModel === M.name + '|' + i3d && S.viewer) { drawStickers(); return; }
   const st = $('viewStatus'); st.hidden = false; st.textContent = 'Reading the 3D model…'; await tick(); await tick();
   try {
     const text = new TextDecoder().decode(M.files.get(i3d)).replace(/^﻿/, '');
-    const shapes = Core.readAllShapes(M.files.get(i3d + '.shapes'));
+    const shapes = partsOf(i3d).shapes;
     await S.viewer.load({ i3dPath: i3d, text, shapes, files: M.files });
     loadedModel = M.name + '|' + i3d; st.hidden = true; drawStickers();
   } catch (e) { st.textContent = 'This model couldn’t be shown: ' + e.message; }
@@ -721,6 +721,34 @@ function cornersOf(p, rotDeg, width, aspect, normal) {
   const f = frameOf(normal, rotDeg), h = width / aspect, c = V.add(p, V.mul(f.n, 0.004)), hw = V.mul(f.r, width / 2), hh = V.mul(f.u, h / 2);
   return [V.sub(V.sub(c, hw), hh), V.sub(V.add(c, hw), hh), V.add(V.add(c, hw), hh), V.add(V.sub(c, hw), hh)];
 }
+/** The sticker's shape on the part: wrapped onto the surface when the part's mesh is known, else a flat card. */
+/** Every part of a model with its world matrix, read from the mod files (same maths as the 3D view). */
+function partsOf(i3d) {
+  const M = S.mod, key = M.name + '|' + i3d; if (partCache.has(key)) return partCache.get(key);
+  const text = new TextDecoder().decode(M.files.get(i3d)).replace(/^\uFEFF/, ''), doc = Core.parseXML(text), root = Core.find(doc, 'i3D') || doc;
+  const shapes = Core.readAllShapes(M.files.get(i3d + '.shapes')), nodes = new Map(), vec = (v, d) => v ? v.trim().split(/\s+/).map(Number) : d;
+  (function walk(el, W) { for (const c of el.children) { if (!['Shape', 'TransformGroup', 'Light', 'Camera', 'Dynamic', 'AudioSource'].includes(c.tag)) continue;
+    const a = c.attrs, Wc = Core.mmul(W, Core.mat(vec(a.translation, [0, 0, 0]), vec(a.rotation, [0, 0, 0]), vec(a.scale, [1, 1, 1])));
+    if (c.tag === 'Shape' && a.shapeId && a.nodeId) nodes.set(a.nodeId, { W: Wc, shapeId: +a.shapeId }); walk(c, Wc); } })(Core.find(root, 'Scene') || root, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  const r = { shapes, nodes }; partCache.set(key, r); return r;
+}
+function welded(i3d, nodeId) {
+  const key = S.mod.name + '|' + i3d + '|' + nodeId; if (weldCache.has(key)) return weldCache.get(key);
+  let m = null;
+  try {
+    const P = partsOf(i3d), n = P.nodes.get(nodeId), g = n && P.shapes.get(n.shapeId);
+    if (g) { const W = n.W, pos = new Float32Array(g.pos.length);
+      for (let i = 0; i < g.pos.length; i += 3) { const x = g.pos[i], y = g.pos[i + 1], z = g.pos[i + 2];
+        pos[i] = W[0] * x + W[4] * y + W[8] * z + W[12]; pos[i + 1] = W[1] * x + W[5] * y + W[9] * z + W[13]; pos[i + 2] = W[2] * x + W[6] * y + W[10] * z + W[14]; }
+      m = Core.weldMesh(pos, g.tris); }
+  } catch (e) { console.warn(e); }
+  weldCache.set(key, m); return m;
+}
+function stickerGeom(i3d, point, normal, rot, width, aspect, nodeId, face, wrap = true) {
+  const m = welded(i3d, nodeId), f = frameOf(normal, rot);
+  if (m) { try { const g = Core.wrapDecal(m, { point, n: f.n, r: f.r, u: f.u, w: width, h: width / aspect, face: face == null ? -1 : face, maxBendCos: wrap ? -0.2 : 0.77 }); if (g) return { mesh: g }; } catch (e) { console.warn(e); } }
+  return { corners: cornersOf(point, rot, width, aspect, normal) };
+}
 function logoAspect(id) { const l = logoById(id); return l ? l.canvas.width / l.canvas.height : 2; }
 function updateTwin(st) {
   st.twin = null; if (!st.mirror || !S.viewer) return;
@@ -728,12 +756,12 @@ function updateTwin(st) {
   const p = [-st.point[0], st.point[1], st.point[2]], n = [-st.normal[0], st.normal[1], st.normal[2]];
   const hit = S.viewer.castAt(V.add(p, V.mul(n, 0.25)), V.mul(n, -1), 0.6);
   if (!hit) { st.twinNote = 'No matching surface found on the other side.'; return; }
-  st.twin = { point: hit.point, normal: n, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId) }; st.twinNote = '';
+  st.twin = { point: hit.point, normal: n, nodeId: hit.nodeId, name: hit.name, face: hit.face, parentM: S.viewer.worldMatrixOf(hit.nodeId) }; st.twinNote = '';
 }
 function defaultWidth() { // about a fourteenth of the model's size: ~0.6 m on a truck, bigger on a shed
   const s = S.viewer && S.viewer.modelSize || 7; return Math.round(Math.min(3, Math.max(0.3, s / 14)) * 20) / 20;
 }
-function moveTo(st, hit) { Object.assign(st, { point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId) }); }
+function moveTo(st, hit) { Object.assign(st, { point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, face: hit.face, parentM: S.viewer.worldMatrixOf(hit.nodeId) }); }
 let dragTimer = 0;
 function dragSticker(id, hit) {
   const st = S.mod.stickers.find(x => x.id === id); if (!st) return;
@@ -744,7 +772,7 @@ function dragSticker(id, hit) {
 function placeAt(hit) {
   if (!S.lib.length) { toast('Add a logo to your Logo library first.'); return; }
   const M = S.mod, logo = $('placeLogo').value;
-  const st = { id: 'st' + Date.now().toString(36), i3d: M.place.i3d, logo, point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, parentM: S.viewer.worldMatrixOf(hit.nodeId), width: defaultWidth(), rot: 0, mirror: false, twin: null, twinNote: '' };
+  const st = { id: 'st' + Date.now().toString(36), i3d: M.place.i3d, logo, point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, face: hit.face, parentM: S.viewer.worldMatrixOf(hit.nodeId), width: defaultWidth(), rot: 0, mirror: false, twin: null, twinNote: '' };
   M.stickers.push(st); M.place.sel = st.id; drawStickers(); updateChanges();
   toast(`Sticker placed on “${hit.name || 'part'}”. Drag it to move it, or adjust it on the right.`);
 }
@@ -754,15 +782,15 @@ function drawStickers() {
   const here = M.stickers.filter(st => st.i3d === M.place.i3d), list = [];
   for (const st of here) {
     const l = logoById(st.logo); if (!l) continue; const asp = logoAspect(st.logo);
-    list.push({ id: st.id, corners: cornersOf(st.point, st.rot, st.width, asp, st.normal), logo: l.canvas, selected: st.id === M.place.sel });
-    if (st.twin) list.push({ id: st.id, corners: cornersOf(st.twin.point, -st.rot, st.width, asp, st.twin.normal), logo: l.canvas, selected: st.id === M.place.sel });
+    list.push({ id: st.id, ...stickerGeom(st.i3d, st.point, st.normal, st.rot, st.width, asp, st.nodeId, st.face, st.wrap !== false), logo: l.canvas, selected: st.id === M.place.sel });
+    if (st.twin) list.push({ id: st.id, ...stickerGeom(st.i3d, st.twin.point, st.twin.normal, -st.rot, st.width, asp, st.twin.nodeId, st.twin.face, st.wrap !== false), logo: l.canvas, selected: st.id === M.place.sel });
   }
   S.viewer.setStickers(list);
   // side panel
   const st = selected(), ed = $('stickerEdit'); ed.hidden = !st;
   if (st) {
     $('stWidth').value = st.width; $('stWidthV').textContent = st.width.toFixed(2) + ' m'; $('stRot').value = st.rot; $('stRotV').textContent = st.rot + '°';
-    $('stMirror').checked = st.mirror; $('placeLogo').value = st.logo;
+    $('stMirror').checked = st.mirror; $('stWrap').checked = st.wrap !== false; $('placeLogo').value = st.logo;
     $('stInfo').textContent = `On “${st.name || 'part'}”` + (st.twin ? ` and “${st.twin.name || 'part'}”` : '') + (st.twinNote ? '. ' + st.twinNote : '.');
   }
   const box = $('stickerList'); box.innerHTML = '';
@@ -778,13 +806,14 @@ function drawStickers() {
 }
 $('stWidth').addEventListener('input', e => { const st = selected(); if (!st) return; st.width = +e.target.value; drawStickers(); });
 $('stRot').addEventListener('input', e => { const st = selected(); if (!st) return; st.rot = +e.target.value; drawStickers(); });
+$('stWrap').addEventListener('change', e => { const st = selected(); if (!st) return; st.wrap = e.target.checked; drawStickers(); });
 $('stMirror').addEventListener('change', e => { const st = selected(); if (!st) return; st.mirror = e.target.checked; updateTwin(st); drawStickers(); updateChanges(); });
 $('stDelete').onclick = () => { const M = S.mod, st = selected(); if (!st) return; M.stickers = M.stickers.filter(x => x !== st); M.place.sel = null; drawStickers(); updateChanges(); };
 document.querySelectorAll('.nudge [data-n]').forEach(b => b.onclick = () => {
   const st = selected(); if (!st) return; const [dx, dy] = b.dataset.n.split(',').map(Number), step = +$('stStep').value, f = frameOf(st.normal, st.rot);
   const p = V.add(st.point, V.add(V.mul(f.r, dx * step), V.mul(f.u, dy * step)));
   const hit = S.viewer.castAt(V.add(p, V.mul(f.n, 0.2)), V.mul(f.n, -1), 0.4); // stay on the surface
-  if (hit) { moveTo(st, { ...hit, normal: st.normal }); } else st.point = p;
+  if (hit) { moveTo(st, hit); } else { st.point = p; st.face = -1; }
   updateTwin(st); drawStickers();
 });
 /** Write stickers into one model: new shapes, a material + texture per logo, and Shape nodes under the parts they sit on. */
@@ -814,15 +843,18 @@ async function buildStickers(i3d, list) {
   // geometry
   let sid = Math.max(Core.maxShapeId(M.files.get(shapesPath)), ...Core.findAll(root, e => e.tag === 'Shape').map(e => +e.attrs.shapeId || 0));
   const entities = [], children = new Map(); let k = 0;
-  const addOne = (st, point, normal, rot, nodeId, parentM) => {
-    const inv = new THREE.Matrix4().fromArray(parentM).invert();
-    const corners = cornersOf(point, rot, st.width, logoAspect(st.logo), normal).map(c => new THREE.Vector3(...c).applyMatrix4(inv).toArray());
+  const addOne = (st, point, normal, rot, nodeId, parentM, face) => {
+    const inv = new THREE.Matrix4().fromArray(parentM).invert(), nm = new THREE.Matrix3().getNormalMatrix(inv);
+    const g = stickerGeom(i3d, point, normal, rot, st.width, logoAspect(st.logo), nodeId, face, st.wrap !== false);
+    const geo = g.mesh ? { verts: g.mesh.verts, tris: g.mesh.tris, uvs: g.mesh.uvs, normals: g.mesh.normals } : { verts: g.corners, tris: [0, 1, 2, 0, 2, 3], uvs: [[0, 0], [1, 0], [1, 1], [0, 1]], normals: null };
+    const verts = geo.verts.map(c => new THREE.Vector3(...c).applyMatrix4(inv).toArray());
+    const normals = geo.normals && geo.normals.map(n => new THREE.Vector3(...n).applyMatrix3(nm).normalize().toArray());
     const id = ++sid, name = `fds_sticker_${++k}`;
-    entities.push(version => Core.buildShapeEntity({ name, shapeId: id, verts: corners, tris: [0, 1, 2, 0, 2, 3], uvs: [[0, 0], [1, 0], [1, 1], [0, 1]], version }));
+    entities.push(version => Core.buildShapeEntity({ name, shapeId: id, verts, tris: geo.tris, uvs: geo.uvs, normals, version }));
     if (!children.has(nodeId)) children.set(nodeId, []);
     children.get(nodeId).push(`<Shape name="${name}" shapeId="${id}" castsShadows="false" receiveShadows="true" decalLayer="1" clipDistance="150" nodeId="${++maxNode}" materialIds="${matFor.get(st.logo)}"/>`);
   };
-  for (const st of list) { addOne(st, st.point, st.normal, st.rot, st.nodeId, st.parentM); if (st.twin) addOne(st, st.twin.point, st.twin.normal, -st.rot, st.twin.nodeId, st.twin.parentM); }
+  for (const st of list) { addOne(st, st.point, st.normal, st.rot, st.nodeId, st.parentM, st.face); if (st.twin) addOne(st, st.twin.point, st.twin.normal, -st.rot, st.twin.nodeId, st.twin.parentM, st.twin.face); }
   for (const [nodeId, kidsXml] of children) {
     const el = Core.findAll(root, e => e.tag === 'Shape' && e.attrs.nodeId === nodeId)[0]; if (!el) throw new Error('part ' + nodeId + ' not found');
     const ind = indentAt(el.start);

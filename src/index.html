@@ -79,7 +79,7 @@
         <div class="grid" id="gridLikely"></div>
       </div>
       <div class="tabpane" id="tab-place" hidden>
-        <p class="lead">Put a logo anywhere on the model, even where there was none. Click the model to place it; it sticks to the part you click, so a logo on a door moves with the door.</p>
+        <p class="lead">Put a logo anywhere on the model, even where there was none. Click the model to place it. It sticks to the part you click and bends over its curves and corners, so a logo on a door moves with the door.</p>
         <div class="place">
           <div class="viewwrap checker">
             <canvas id="view3d" aria-label="3D view of the model"></canvas>
@@ -96,6 +96,7 @@
               <div class="field"><span class="lab">Nudge</span>
                 <div class="nudge"><button type="button" class="btn small" data-n="0,1" aria-label="Move up">↑</button><button type="button" class="btn small" data-n="-1,0" aria-label="Move left">←</button><button type="button" class="btn small" data-n="1,0" aria-label="Move right">→</button><button type="button" class="btn small" data-n="0,-1" aria-label="Move down">↓</button>
                 <select id="stStep" aria-label="Nudge step"><option value="0.01">1 cm</option><option value="0.05" selected>5 cm</option><option value="0.2">20 cm</option></select></div></div>
+              <label class="check"><input type="checkbox" id="stWrap" checked> <span>Wrap round sharp corners</span></label>
               <label class="check"><input type="checkbox" id="stMirror"> <span>Also put it on the other side</span></label>
               <p class="muted hint" id="stInfo"></p>
             </div>

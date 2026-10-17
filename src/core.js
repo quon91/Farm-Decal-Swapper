@@ -623,8 +623,8 @@ function addConfigOption(src, group, name, texPath, makeDefault) {
  * verts: [[x,y,z]...] in the parent's local space; tris: flat index list; uvs: [[u,v]...]
  * Layout matches shapes written by the GIANTS exporter: header, one subset, 16-bit indices, positions, normals, uv0.
  */
-function buildShapeEntity({ name, shapeId, verts, tris, uvs, version = 10 }) {
-  const nv = verts.length, ni = tris.length;
+function buildShapeEntity({ name, shapeId, verts, tris, uvs, normals = null, version = 10 }) {
+  const nv = verts.length, ni = tris.length, big = nv > 65535;
   // normals from the triangles (counter-clockwise = front, as in exported shapes)
   const nrm = verts.map(() => [0, 0, 0]);
   for (let i = 0; i < ni; i += 3) {
@@ -634,9 +634,10 @@ function buildShapeEntity({ name, shapeId, verts, tris, uvs, version = 10 }) {
     for (const k of [tris[i], tris[i + 1], tris[i + 2]]) for (let j = 0; j < 3; j++) nrm[k][j] += n[j];
   }
   for (const n of nrm) { const l = Math.hypot(...n) || 1; n[0] /= l; n[1] /= l; n[2] /= l; }
+  if (normals) normals.forEach((n, i) => { const l = Math.hypot(...n) || 1; nrm[i] = [n[0] / l, n[1] / l, n[2] / l]; }); // smooth normals from the surface underneath
   const ctr = [0, 1, 2].map(j => verts.reduce((t, v) => t + v[j], 0) / nv), rad = Math.max(...verts.map(v => Math.hypot(v[0] - ctr[0], v[1] - ctr[1], v[2] - ctr[2])));
   const nameB = new TextEncoder().encode(name), head = (4 + nameB.length + 3) & ~3;
-  const idxBytes = (ni * 2 + 3) & ~3;
+  const idxBytes = big ? ni * 4 : (ni * 2 + 3) & ~3;
   const v10 = version >= 10, size = head + 4 * (v10 ? 16 : 14) + idxBytes + nv * 12 * 2 + nv * 8 + 4;
   const out = new Uint8Array(size), dv = new DataView(out.buffer); let o = 0;
   dv.setInt32(o, nameB.length, true); out.set(nameB, 4); o = head;
@@ -646,12 +647,117 @@ function buildShapeEntity({ name, shapeId, verts, tris, uvs, version = 10 }) {
   if (v10) I(0);                       // reserved (version 10+)
   I(0); I(nv); I(0); I(ni); F(1);      // subset: first vertex, vertex count, first index, index count, uv density
   if (v10) I(0);                       // reserved (version 10+)
-  for (let i = 0; i < ni; i++) dv.setUint16(o + 2 * i, tris[i], true); o += idxBytes;
+  for (let i = 0; i < ni; i++) big ? dv.setUint32(o + 4 * i, tris[i], true) : dv.setUint16(o + 2 * i, tris[i], true); o += idxBytes;
   for (const v of verts) { F(v[0]); F(v[1]); F(v[2]); }
   for (const n of nrm) { F(n[0]); F(n[1]); F(n[2]); }
   for (const t of uvs) { F(t[0]); F(t[1]); }
   I(0);                                // reserved
   return out;
+}
+/* ---------- stickers that wrap onto the surface ---------- */
+/**
+ * Weld a triangle mesh (positions already in world space) so neighbouring triangles can be found.
+ * pos: flat [x,y,z,...]; tris: flat vertex indices. Face order is kept, so a raycast faceIndex still points at the same face.
+ */
+function weldMesh(pos, tris) {
+  const map = new Map(), remap = new Int32Array(pos.length / 3), P = [];
+  for (let i = 0; i < remap.length; i++) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2], key = Math.round(x * 2e4) + ',' + Math.round(y * 2e4) + ',' + Math.round(z * 2e4);
+    let k = map.get(key); if (k === undefined) { k = P.length / 3; map.set(key, k); P.push(x, y, z); } remap[i] = k;
+  }
+  const nf = Math.floor(tris.length / 3), T = new Int32Array(nf * 3), FN = new Float64Array(nf * 3), FA = new Float64Array(nf);
+  const edges = new Map(), vf = Array.from({ length: P.length / 3 }, () => []);
+  for (let f = 0; f < nf; f++) {
+    const a = remap[tris[f * 3]], b = remap[tris[f * 3 + 1]], c = remap[tris[f * 3 + 2]]; T[f * 3] = a; T[f * 3 + 1] = b; T[f * 3 + 2] = c;
+    const e1 = [P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]], e2 = [P[c * 3] - P[a * 3], P[c * 3 + 1] - P[a * 3 + 1], P[c * 3 + 2] - P[a * 3 + 2]];
+    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]], l = Math.hypot(n[0], n[1], n[2]);
+    FA[f] = l / 2; if (l > 0) { FN[f * 3] = n[0] / l; FN[f * 3 + 1] = n[1] / l; FN[f * 3 + 2] = n[2] / l; }
+    if (a === b || b === c || a === c) continue; // degenerate after welding
+    for (const [u, v] of [[a, b], [b, c], [c, a]]) { const key = u < v ? u * 4194304 + v : v * 4194304 + u; let L = edges.get(key); if (!L) edges.set(key, L = []); L.push(f); }
+    vf[a].push(f); vf[b].push(f); vf[c].push(f);
+  }
+  return { P, T, FN, FA, edges, vf, nf };
+}
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+function faceN(m, f) { return [m.FN[f * 3], m.FN[f * 3 + 1], m.FN[f * 3 + 2]]; }
+function nearestFace(m, p) { // fallback when no raycast face index is known
+  let best = -1, bd = Infinity;
+  for (let f = 0; f < m.nf; f++) {
+    let cx = 0, cy = 0, cz = 0; for (let k = 0; k < 3; k++) { const v = m.T[f * 3 + k]; cx += m.P[v * 3]; cy += m.P[v * 3 + 1]; cz += m.P[v * 3 + 2]; }
+    const d = (cx / 3 - p[0]) ** 2 + (cy / 3 - p[1]) ** 2 + (cz / 3 - p[2]) ** 2 - 4 * m.FA[f]; // big faces may be far from their centre
+    if (d < bd) { bd = d; best = f; }
+  }
+  return best;
+}
+/**
+ * Lay a w×h sticker onto the surface like vinyl: start at the face under `point` and unfold neighbouring
+ * faces into the sticker's plane, so it follows curves and wraps round corners (up to about 100°, never
+ * folding back round a panel edge). maxBendCos: sharpest fold allowed at one edge (cosine; 0.77 ≈ 40° keeps it
+ * off the far side of a sharp corner while still following smooth curves). Returns world-space verts/normals/uvs/tris, lifted `offset` off the surface.
+ * r,u: unit right/up directions on the surface at the point; n: the outward normal there.
+ */
+function wrapDecal(m, { point, n, r, u, w, h, offset = 0.004, face = -1, maxBendCos = -0.2, maxTurnCos = -0.2 }) {
+  let f0 = face >= 0 && face < m.nf ? face : nearestFace(m, point); if (f0 < 0) return null;
+  const s = dot3(faceN(m, f0), n) < 0 ? -1 : 1, n0 = faceN(m, f0).map(v => v * s);
+  const at = v => [m.P[v * 3], m.P[v * 3 + 1], m.P[v * 3 + 2]];
+  const to2 = v => { const q = at(v), d = [q[0] - point[0], q[1] - point[1], q[2] - point[2]]; return [dot3(d, r), dot3(d, u)]; };
+  const hw = w / 2, hh = h / 2;
+  const cornerN = new Map(); // smooth normal per (vertex, side of the sheet), so wrapped pieces stay joined
+  const smooth = (v, f) => {
+    const key = v * 2 + (s > 0 ? 1 : 0) + ':' + f; let c = cornerN.get(key); if (c) return c;
+    const fn = faceN(m, f), acc = [0, 0, 0];
+    for (const g of m.vf[v]) { const gn = faceN(m, g); if (dot3(gn, fn) > -0.5) { acc[0] += gn[0] * m.FA[g]; acc[1] += gn[1] * m.FA[g]; acc[2] += gn[2] * m.FA[g]; } }
+    const l = Math.hypot(...acc) || 1; c = [acc[0] / l * s, acc[1] / l * s, acc[2] / l * s]; cornerN.set(key, c); return c;
+  };
+  const verts = [], nrms = [], uvs = [], tris = [];
+  const seen = new Uint8Array(m.nf), queue = [[f0, [0, 1, 2].map(k => to2(m.T[f0 * 3 + k]))]]; seen[f0] = 1;
+  let guard = 0;
+  while (queue.length && guard++ < 200000) {
+    const [f, q] = queue.shift(), idx = [m.T[f * 3], m.T[f * 3 + 1], m.T[f * 3 + 2]];
+    // clip this face to the sticker rectangle (in the unfolded plane), carrying 3D position and normal
+    let poly = [0, 1, 2].map(k => ({ x: q[k][0], y: q[k][1], p: at(idx[k]), nn: smooth(idx[k], f) }));
+    for (const [ax, sg, lim] of [['x', 1, hw], ['x', -1, hw], ['y', 1, hh], ['y', -1, hh]]) {
+      const out = [], inside = v => sg * v[ax] <= lim + 1e-9;
+      for (let i = 0; i < poly.length; i++) {
+        const A = poly[i], B = poly[(i + 1) % poly.length], ia = inside(A), ib = inside(B);
+        if (ia) out.push(A);
+        if (ia !== ib) { const t = (lim - sg * A[ax]) / (sg * B[ax] - sg * A[ax]), L = (a, b) => a + (b - a) * t;
+          out.push({ x: L(A.x, B.x), y: L(A.y, B.y), p: [0, 1, 2].map(j => L(A.p[j], B.p[j])), nn: [0, 1, 2].map(j => L(A.nn[j], B.nn[j])) }); }
+      }
+      poly = out; if (!poly.length) break;
+    }
+    if (poly.length >= 3) {
+      const base = verts.length, fn = faceN(m, f).map(v => v * s);
+      for (const v of poly) { const l = Math.hypot(...v.nn) || 1, nn = v.nn.map(c => c / l); verts.push(v.p.map((c, j) => c + nn[j] * offset)); nrms.push(nn); uvs.push([v.x / w + 0.5, v.y / h + 0.5]); }
+      for (let i = 1; i + 1 < poly.length; i++) {
+        const a = verts[base], b = verts[base + i], c = verts[base + i + 1];
+        const cr = [(b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]), (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])];
+        if (dot3(cr, fn) >= 0) tris.push(base, base + i, base + i + 1); else tris.push(base, base + i + 1, base + i);
+      }
+    }
+    // unfold neighbours across each edge that still touches the rectangle
+    const fnf = faceN(m, f);
+    for (let e = 0; e < 3; e++) {
+      const ia = idx[e], ib = idx[(e + 1) % 3], A = q[e], B = q[(e + 1) % 3], C = q[(e + 2) % 3];
+      const L = m.edges.get(ia < ib ? ia * 4194304 + ib : ib * 4194304 + ia); if (!L) continue;
+      let g = -1, bestDot = -2;
+      for (const c of L) { if (c === f || seen[c]) continue; const d = dot3(faceN(m, c), fnf); if (d > bestDot) { bestDot = d; g = c; } }
+      if (g < 0 || bestDot < maxBendCos || dot3(faceN(m, g).map(v => v * s), n0) < maxTurnCos) continue; // too sharp a fold, or turned back on itself
+      const gi = [m.T[g * 3], m.T[g * 3 + 1], m.T[g * 3 + 2]], third = gi.find(v => v !== ia && v !== ib); if (third === undefined) continue;
+      const pa = at(ia), pb = at(ib), pd = at(third), ab = pb.map((v, j) => v - pa[j]), ad = pd.map((v, j) => v - pa[j]);
+      const ab2 = dot3(ab, ab) || 1e-12, t = dot3(ad, ab) / ab2, foot = ab.map((v, j) => pa[j] + v * t), hgt = Math.hypot(pd[0] - foot[0], pd[1] - foot[1], pd[2] - foot[2]);
+      const ex = B[0] - A[0], ey = B[1] - A[1], el = Math.hypot(ex, ey) || 1e-12, px = -ey / el, py = ex / el;
+      const side = ((ex) * (C[1] - A[1]) - (ey) * (C[0] - A[0])) >= 0 ? -1 : 1; // put the new face on the far side of the shared edge
+      const D = [A[0] + ex * t + side * px * hgt, A[1] + ey * t + side * py * hgt];
+      const q2 = gi.map(v => v === ia ? A : v === ib ? B : D);
+      const minX = Math.min(...q2.map(v => v[0])), maxX = Math.max(...q2.map(v => v[0])), minY = Math.min(...q2.map(v => v[1])), maxY = Math.max(...q2.map(v => v[1]));
+      seen[g] = 1;
+      if (maxX < -hw || minX > hw || maxY < -hh || minY > hh) continue; // fully outside: don't spread past it
+      queue.push([g, q2]);
+    }
+  }
+  if (!tris.length) return null;
+  return { verts, normals: nrms, uvs, tris };
 }
 /** Return a copy of an .i3d.shapes file with extra shape entities appended (encrypted like the rest). */
 function appendShapeEntities(u8, datas) {
@@ -696,7 +802,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
