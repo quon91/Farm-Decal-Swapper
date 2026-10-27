@@ -246,3 +246,7 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .copyopt .check{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
 .copytag{width:7.5em}
 @media (max-width:560px){.namerow{grid-template-columns:1fr}}
+
+.field-inline{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0 10px;font-size:.9rem}
+#replaceSet{margin-top:6px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+#replaceSet[hidden]{display:none}

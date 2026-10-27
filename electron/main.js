@@ -7,6 +7,8 @@ const yauzl = require('yauzl');
 
 const DEFAULT_MODS = () => path.join(app.getPath('documents'), 'My Games', 'FarmingSimulator2025', 'mods');
 const BACKUPS = () => path.join(app.getPath('documents'), 'Farm Decal Swapper', 'Backups');
+const ORIGINALS = () => path.join(app.getPath('documents'), 'Farm Decal Swapper', 'Original mods');
+const GAME_DIR = () => path.dirname(DEFAULT_MODS()); // savegame1, savegame2, ... live here
 let win;
 const AUTOSAVE = process.env.FDS_AUTOSAVE === '1'; // used only by the automated tests: skips the save dialog
 
@@ -84,7 +86,56 @@ function safeJoin(dir, rel) { const p = path.resolve(dir, rel); if (!p.startsWit
 ipcMain.handle('version', () => app.getVersion());
 ipcMain.handle('defaultModsDir', () => DEFAULT_MODS());
 ipcMain.handle('backupDir', () => BACKUPS());
-ipcMain.handle('openPath', async (_e, which) => { const p = which === 'backups' ? BACKUPS() : null; if (p) { await fsp.mkdir(p, { recursive: true }); shell.openPath(p); } });
+ipcMain.handle('openPath', async (_e, which) => { const p = which === 'backups' ? BACKUPS() : which === 'originals' ? ORIGINALS() : null; if (p) { await fsp.mkdir(p, { recursive: true }); shell.openPath(p); } });
+ipcMain.handle('originalsDir', () => ORIGINALS());
+
+/* ---------- replacing a mod with your own copy ---------- */
+function gameRunning() {
+  if (process.platform !== 'win32') return Promise.resolve(false);
+  return new Promise(res => require('child_process').execFile('tasklist', ['/FO', 'CSV', '/NH'], { windowsHide: true }, (err, out) => res(!err && /"FarmingSimulator2025[^"]*\.exe"/i.test(out))));
+}
+const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Mods in the folder that list `name` as a dependency (they'd break if it moved). */
+async function dependentsOf(modsDir, name) {
+  const re = new RegExp('<dependency>\\s*' + escRe(name) + '\\s*</dependency>', 'i'), out = [];
+  for (const d of await fsp.readdir(modsDir, { withFileTypes: true })) {
+    const full = path.join(modsDir, d.name); let xml = null;
+    try {
+      if (d.isFile() && /\.zip$/i.test(d.name)) { const e = await readZipEntries(full, n => /(^|\/)moddesc\.xml$/i.test(n)); const k = Object.keys(e)[0]; if (k) xml = e[k].toString('utf8'); }
+      else if (d.isDirectory() && fs.existsSync(path.join(full, 'modDesc.xml'))) xml = await fsp.readFile(path.join(full, 'modDesc.xml'), 'utf8');
+    } catch (e) {}
+    if (xml && re.test(xml)) out.push(d.name);
+  }
+  return out;
+}
+/** Point every savegame at the new mod name. Whole names only (FS25_X never matches inside FS25_X_Extra). Backs up each file it changes. */
+async function retargetSavegames(oldName, newName, backupRoot) {
+  const re = new RegExp('(?<![A-Za-z0-9_])' + escRe(oldName) + '(?![A-Za-z0-9_])', 'g'), out = [];
+  let dirs = []; try { dirs = (await fsp.readdir(GAME_DIR(), { withFileTypes: true })).filter(d => d.isDirectory() && /^savegame\d+$/i.test(d.name)); } catch (e) { return out; }
+  for (const d of dirs) {
+    const sd = path.join(GAME_DIR(), d.name), changed = [];
+    for (const f of (await fsp.readdir(sd)).filter(f => /\.xml$/i.test(f))) {
+      const p = path.join(sd, f), txt = await fsp.readFile(p, 'utf8'); re.lastIndex = 0; if (!re.test(txt)) continue; re.lastIndex = 0;
+      const b = path.join(backupRoot, d.name, f); await fsp.mkdir(path.dirname(b), { recursive: true }); await fsp.copyFile(p, b);
+      const tmp = p + '.fds'; await fsp.writeFile(tmp, txt.replace(re, newName)); await fsp.rename(tmp, p); changed.push(f);
+    }
+    if (changed.length) out.push({ savegame: d.name, files: changed });
+  }
+  return out;
+}
+ipcMain.handle('replaceOriginal', async (_e, { oldPath, oldName, newName }) => {
+  if (await gameRunning()) return { error: 'game-running' };
+  const backupRoot = path.join(BACKUPS(), `Savegames before ${newName} ${stamp()}`);
+  const savegames = await retargetSavegames(oldName, newName, backupRoot);
+  let movedTo = null; const dependents = oldPath && fs.existsSync(oldPath) ? (await dependentsOf(path.dirname(oldPath), oldName)).filter(n => n !== path.basename(oldPath)) : [];
+  if (oldPath && fs.existsSync(oldPath) && !dependents.length) {
+    await fsp.mkdir(ORIGINALS(), { recursive: true });
+    movedTo = path.join(ORIGINALS(), path.basename(oldPath));
+    if (fs.existsSync(movedTo)) movedTo = path.join(ORIGINALS(), `${path.basename(oldPath, '.zip')}_${stamp()}.zip`);
+    try { await fsp.rename(oldPath, movedTo); } catch (e) { if (e.code !== 'EXDEV') throw e; await fsp.copyFile(oldPath, movedTo); await fsp.unlink(oldPath); }
+  }
+  return { movedTo, savegames, backupDir: savegames.length ? backupRoot : null, dependents };
+});
 ipcMain.handle('pickFolder', async (_e, current) => {
   const r = await dialog.showOpenDialog(win, { title: 'Choose your FS25 mods folder', defaultPath: current || DEFAULT_MODS(), properties: ['openDirectory'] });
   return r.canceled ? null : r.filePaths[0];

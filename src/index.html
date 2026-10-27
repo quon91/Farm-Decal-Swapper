@@ -62,7 +62,7 @@
         <div class="vacts">
           <span class="changes" id="changeSum">No changes yet</span>
           <button type="button" class="btn" id="btnCloseMod">Close</button>
-          <span class="copyopt" id="copyOpt" hidden><label class="check"><input type="checkbox" id="saveCopy"> <span>As my own copy</span></label><input type="text" id="copyTag" class="copytag" maxlength="16" aria-label="Name tag added to your copy" hidden></span>
+          <span class="copyopt" id="copyOpt" hidden><label class="check"><input type="checkbox" id="saveCopy"> <span>As my own copy</span></label></span>
           <button type="button" class="btn primary" id="btnSave" disabled>Save mod</button>
         </div>
       </header>
@@ -160,6 +160,17 @@
           <label class="check"><input type="checkbox" id="backup"> <span>Copy the original mod to a backup folder before saving over it</span></label>
           <p class="muted mono path" id="backupPath"></p>
           <button type="button" class="btn small" id="btnOpenBackups">Open backup folder</button>
+        </div>
+        <div class="set">
+          <h3>Your own copies</h3>
+          <p class="muted">Edited ModHub mods get flagged for an update, and updating them wipes your changes. Saving as your own copy gives the mod a new name, so the game treats it as yours.</p>
+          <label class="field-inline">Name tag <input type="text" id="copyTag" class="copytag" maxlength="16" aria-describedby="copyEx"> <span class="muted mono" id="copyEx"></span></label>
+          <label class="check"><input type="checkbox" id="saveCopyDefault"> <span>Always save edited mods as my own copy</span></label>
+          <div id="replaceSet" hidden>
+            <label class="check"><input type="checkbox" id="replaceOrig"> <span>Then move the original out of the mods folder and switch my savegames to my copy, so vehicles and buildings I already own keep working</span></label>
+            <p class="muted mono path" id="origPath"></p>
+            <button type="button" class="btn small" id="btnOpenOriginals">Open original mods folder</button>
+          </div>
         </div>
         <div class="set" id="setFolder" hidden>
           <h3>Mods folder</h3>

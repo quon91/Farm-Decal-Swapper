@@ -59,13 +59,21 @@ function initSettings() {
   document.querySelectorAll('input[name=q]').forEach(i => i.addEventListener('change', () => { store.set('quality', quality()); if (S.current) syncEditor(); }));
   $('hd').addEventListener('change', () => { store.set('hd', hdOn() ? '1' : '0'); if (S.current) syncEditor(); });
   $('backup').addEventListener('change', () => store.set('backup', $('backup').checked ? '1' : '0'));
-  $('saveCopy').checked = store.get('saveCopy') === '1'; $('copyTag').value = store.get('copyTag') || 'Custom';
-  $('saveCopy').addEventListener('change', () => { store.set('saveCopy', $('saveCopy').checked ? '1' : '0'); showCopyName(); });
+  const DEF = window.FDS_DEFAULTS || {}, pref = (k, d) => { const v = store.get(k); return v == null ? d : v; };
+  $('copyTag').value = pref('copyTag', DEF.copyTag || 'MY');
+  $('saveCopyDefault').checked = pref('saveCopy', DEF.saveCopy ? '1' : '0') === '1'; $('saveCopy').checked = $('saveCopyDefault').checked;
+  $('replaceOrig').checked = pref('replaceOrig', DEF.replaceOrig ? '1' : '0') === '1';
+  $('saveCopyDefault').addEventListener('change', () => { store.set('saveCopy', $('saveCopyDefault').checked ? '1' : '0'); $('saveCopy').checked = $('saveCopyDefault').checked; showCopyName(); });
+  $('saveCopy').addEventListener('change', showCopyName); // just for this save
+  $('replaceOrig').addEventListener('change', () => store.set('replaceOrig', $('replaceOrig').checked ? '1' : '0'));
   $('copyTag').addEventListener('input', () => { store.set('copyTag', $('copyTag').value); showCopyName(); });
+  showCopyName();
   if (APP) {
     $('setBackup').hidden = false; $('setFolder').hidden = false; $('btnFolder').hidden = false;
     APP.backupDir().then(p => $('backupPath').textContent = p);
     $('btnOpenBackups').onclick = () => APP.openPath('backups');
+    $('replaceSet').hidden = false; $('btnOpenOriginals').onclick = () => APP.openPath('originals');
+    APP.originalsDir().then(p => $('origPath').textContent = p);
     APP.version().then(v => $('appVer').textContent = 'v' + v);
     $('sideFoot').textContent = 'Everything runs on your computer. Works offline.';
   }
@@ -188,7 +196,7 @@ async function loadMod(zip, name, path, kind) {
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);
   $('navMod').hidden = false; $('navModName').textContent = title; $('saveMsg').hidden = true;
   $('cntOptions').textContent = analysis.groups.length || ''; $('cntTex').textContent = analysis.textures.length; $('cntFiles').textContent = entries.length;
-  renderOpts(); showCopyName(); setView('mod'); setTab(analysis.textures.some(isLikely) || !analysis.groups.length ? 'logos' : 'options'); updateChanges();
+  renderOpts(); $('saveCopy').checked = $('saveCopyDefault').checked; showCopyName(); setView('mod'); setTab(analysis.textures.some(isLikely) || !analysis.groups.length ? 'logos' : 'options'); updateChanges();
 }
 $('btnCloseMod').onclick = () => { if (changeCount() && !confirmDiscard()) return; if (S.viewer) { S.viewer.dispose(); S.viewer = null; } S.mod = null; $('navMod').hidden = true; setView('mods'); };
 window.addEventListener('beforeunload', e => { if (S.mod && changeCount() && !APP) { e.preventDefault(); e.returnValue = ''; } });
@@ -949,12 +957,17 @@ function updateChanges() {
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
 }
 /* ---- saving as a separate copy (ModHub mods: the game wants to "update" an edited original) ---- */
-const copyTag = () => ($('copyTag').value || '').replace(/[^A-Za-z0-9]+/g, '') || 'Custom';
-function copyName(name) { const base = name.replace(/\.zip$/i, ''), suf = '_' + copyTag(); return (base.toLowerCase().endsWith(suf.toLowerCase()) ? base : base + suf) + '.zip'; }
+const copyTag = () => ($('copyTag').value || '').replace(/[^A-Za-z0-9]+/g, '') || 'MY';
+/** FS25_Workstar_Pack -> FS25_DBF_Workstar_Pack. A name that already carries the tag is kept, so editing your copy saves over it. */
+function isCopyName(base) { const t = copyTag().toLowerCase(), b = base.toLowerCase(); return b.startsWith(`fs25_${t}_`) || b.startsWith(`${t}_`) || b.endsWith(`_${t}`); }
+function copyName(name) {
+  const base = name.replace(/\.zip$/i, ''), t = copyTag(); if (isCopyName(base)) return base + '.zip';
+  const m = base.match(/^(FS\d\d)_(.+)$/i); return (m ? `${m[1]}_${t}_${m[2]}` : `${t}_${base}`) + '.zip';
+}
 const savingCopy = () => !!(S.mod && S.mod.kind !== 'folder' && $('saveCopy').checked);
 function showCopyName() {
+  $('copyEx').textContent = 'FS25_Workstar_Pack → ' + copyName('FS25_Workstar_Pack.zip').replace(/\.zip$/, '');
   const M = S.mod, on = M && M.kind !== 'folder'; $('copyOpt').hidden = !on; if (!on) return;
-  $('copyTag').hidden = !$('saveCopy').checked;
   $('btnSave').textContent = $('saveCopy').checked ? 'Save my copy' : 'Save mod';
   $('copyOpt').title = $('saveCopy').checked ? `Saves as ${copyName(M.name)} next to the original, so the game treats it as a separate mod and never replaces it with a ModHub update.` : 'Save as a separate mod with its own name, so the game won’t offer to replace it with a ModHub update.';
 }
@@ -1020,12 +1033,25 @@ async function saveMod() {
       else { const r = await offerFile(saveName, blob, 'zip'); result = r === 'saved' ? { saved: true, name: saveName, size: blob.size } : { canceled: true }; }
     }
     if (result && result.canceled) { msg.hidden = true; return; }
-    msg.textContent = asCopy
+    let swap = null;
+    if (asCopy && APP && $('replaceOrig').checked && saveName !== M.name && M.path && result.path) {
+      say('Moving the original out of the mods folder and switching your savegames to your copy…'); await tick();
+      try { swap = await APP.replaceOriginal({ oldPath: M.path, oldName: M.name.replace(/\.zip$/i, ''), newName: saveName.replace(/\.zip$/i, '') }); } catch (e) { swap = { error: cleanErr(e) }; }
+      if (swap && !swap.error && swap.movedTo) { M.path = result.path; M.name = saveName; $('modFile').textContent = result.path; } // the open mod is now your copy
+    }
+    msg.textContent = swap && !swap.error
+      ? `Saved your copy as ${saveName}. ` + (swap.movedTo ? `The original moved to ${swap.movedTo}. ` : swap.dependents && swap.dependents.length ? `The original stays in your mods folder because ${swap.dependents.join(', ')} need${swap.dependents.length === 1 ? 's' : ''} it. ` : '') +
+        (swap.savegames.length ? `Switched ${swap.savegames.map(s => s.savegame).join(', ')} to your copy, so what you own keeps working (old savegame files are in ${swap.backupDir}). ` : 'No savegame used this mod yet. ') + 'Start the game to see it.'
+      : swap && swap.error
+      ? `Saved your copy as ${saveName}, but the original wasn’t moved: ` + (swap.error === 'game-running' ? 'the game is running. Close it, then save again to finish.' : swap.error)
+      : asCopy && saveName !== M.name && !(swap && swap.movedTo)
       ? (APP ? `Saved your own copy to ${result.path}.` : `Saved your own copy as ${saveName}. Put it in your mods folder next to the original.`) +
-        ` The game treats it as a separate mod, so a ModHub update won’t replace it. In the mod list its title ends in “(${copyTag()})”. Buy the vehicle again from your copy (give it its own shop name under Shop options so you can tell the two apart). Vehicles you already own came from the original, so keep the original installed if you want to keep them.`
+        ` The game treats it as a separate mod, so a ModHub update won’t replace it. Vehicles you already own came from the original, so keep the original installed if you want to keep them` + (APP ? ', or turn on “move the original and switch my savegames” in Settings.' : '.')
       : APP
       ? `Saved to ${result.path}${result.backupPath ? '. The original is backed up in ' + result.backupPath : ''}. Start the game to see it.`
       : `Saved ${M.name}. Put it in your mods folder under the same name, replacing the old one.`;
+    if (swap && swap.error) msg.className = 'savemsg err';
+    if (swap && !swap.error && typeof loadModsFolder === 'function') loadModsFolder().catch(() => {});
   } catch (e) { msg.className = 'savemsg err'; msg.textContent = 'Saving failed: ' + cleanErr(e) + (/EBUSY|EPERM|EACCES/.test(String(e && e.message)) ? '. If the game is running, close it and try again.' : ''); }
   finally { updateChanges(); }
 }
