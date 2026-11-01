@@ -70,4 +70,15 @@ test('shop names: rename a choice, the shop name and tag the mod title', () => {
   const md = '<modDesc><title>\n  <en>Truck</en>\n  <de>Laster</de>\n</title></modDesc>', tagged = Core.tagModTitle(Core.tagModTitle(md, 'DBF'), 'DBF');
   assert.ok(tagged.includes('<en>Truck (DBF)</en>') && tagged.includes('<de>Laster (DBF)</de>') && !tagged.includes('(DBF) (DBF)'));
 });
+test('shop logo choice: index paths and a design configuration that switches parts', () => {
+  const i3d = '<i3D><Scene><TransformGroup name="root" nodeId="1"><Shape name="a" nodeId="2"/><TransformGroup name="g" nodeId="3"><Shape name="b" nodeId="4"/></TransformGroup></TransformGroup><Shape name="c" nodeId="5"/></Scene></i3D>';
+  const P = Core.nodePaths(Core.parseXML(i3d));
+  assert.strictEqual(P.get('1'), '0>'); assert.strictEqual(P.get('2'), '0>0'); assert.strictEqual(P.get('4'), '0>1|0'); assert.strictEqual(P.get('5'), '1>');
+  const veh = '<vehicle>\n    <base>\n        <filename>truck.i3d</filename>\n    </base>\n    <designConfigurations/>\n    <i3dMappings>\n        <i3dMapping id="x" node="0>"/>\n    </i3dMappings>\n</vehicle>';
+  assert.strictEqual(Core.vehicleI3d(veh), 'truck.i3d'); assert.strictEqual(Core.freeDesignSlot(veh), 'design8');
+  const out = Core.addSwitchConfig(veh, 'design8', 'Farm logo', [{ name: 'No logo', mappings: [] }, { name: 'Badge', mappings: ['s1'], isDefault: true }], [{ id: 's1', path: '0>1|1' }]);
+  assert.ok(out.includes('<i3dMapping id="s1" node="0>1|1" />') && out.indexOf('id="s1"') > out.indexOf('id="x"'));
+  assert.ok(out.includes('<design8Configuration name="Badge" price="0" isDefault="true">') && out.includes('<objectChange node="s1" visibilityActive="true" visibilityInactive="false" />'));
+  assert.strictEqual(Core.freeDesignSlot(out), 'design7'); assert.ok(out.trim().endsWith('</vehicle>'));
+});
 console.log(`\n${n} tests passed`);

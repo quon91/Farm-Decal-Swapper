@@ -3,7 +3,7 @@
 'use strict';
 
 function FDSViewer(canvas) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.outputEncoding = THREE.sRGBEncoding;
   const scene = new THREE.Scene();
@@ -198,6 +198,15 @@ function FDSViewer(canvas) {
     get modelSize() { return modelSize; },
     setBackground(c) { bg = c; needs = true; },
     snapshot() { renderer.render(scene, camera); return canvas.toDataURL('image/png'); },
+    /** Render the current view at w×h with a see-through background; returns a 2D canvas. */
+    snapshotAt(w, h) {
+      const pr = renderer.getPixelRatio(), cw = canvas.clientWidth, ch = canvas.clientHeight, oldBg = scene.background;
+      renderer.setPixelRatio(1); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+      scene.background = null; renderer.setClearColor(0x000000, 0); renderer.render(scene, camera);
+      const out = document.createElement('canvas'); out.width = w; out.height = h; out.getContext('2d').drawImage(canvas, 0, 0, w, h);
+      scene.background = oldBg; renderer.setPixelRatio(pr); renderer.setSize(cw, ch, false); camera.aspect = cw / ch; camera.updateProjectionMatrix(); needs = true;
+      return out;
+    },
     dispose() { disposed = true; clear(); renderer.dispose(); },
   };
 }

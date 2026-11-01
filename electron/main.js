@@ -57,7 +57,9 @@ async function describeZip(full) {
   const st = await fsp.stat(full);
   const base = { name: path.basename(full), path: full, kind: 'zip', size: st.size, mtime: st.mtimeMs, title: null, version: null, icon: null };
   try {
-    const first = await readZipEntries(full, n => /(^|\/)moddesc\.xml$/i.test(n));
+    let edited = false;
+    const first = await readZipEntries(full, n => { if (/(^|\/)custom_decals\//i.test(n)) edited = true; return /(^|\/)moddesc\.xml$/i.test(n); });
+    base.edited = edited;
     const key = Object.keys(first).sort((a, b) => a.length - b.length)[0]; if (!key) return null; // not an FS mod
     const info = modInfoFrom(first[key].toString('utf8').replace(/^﻿/, '')), prefix = key.slice(0, key.length - 'modDesc.xml'.length);
     Object.assign(base, { title: info.title, version: info.version });
@@ -68,7 +70,7 @@ async function describeZip(full) {
 async function describeFolder(full) {
   const md = path.join(full, 'modDesc.xml'); if (!fs.existsSync(md)) return null;
   const xml = (await fsp.readFile(md, 'utf8')).replace(/^﻿/, ''), info = modInfoFrom(xml);
-  const res = { name: path.basename(full), path: full, kind: 'folder', size: 0, mtime: (await fsp.stat(full)).mtimeMs, title: info.title, version: info.version, icon: null };
+  const res = { edited: fs.existsSync(path.join(full, 'custom_decals')), name: path.basename(full), path: full, kind: 'folder', size: 0, mtime: (await fsp.stat(full)).mtimeMs, title: info.title, version: info.version, icon: null };
   if (info.icon) { const ip = path.join(full, info.icon); if (fs.existsSync(ip)) res.icon = new Uint8Array(await fsp.readFile(ip)); }
   return res;
 }
@@ -88,6 +90,7 @@ ipcMain.handle('defaultModsDir', () => DEFAULT_MODS());
 ipcMain.handle('backupDir', () => BACKUPS());
 ipcMain.handle('openPath', async (_e, which) => { const p = which === 'backups' ? BACKUPS() : which === 'originals' ? ORIGINALS() : null; if (p) { await fsp.mkdir(p, { recursive: true }); shell.openPath(p); } });
 ipcMain.handle('originalsDir', () => ORIGINALS());
+ipcMain.handle('listOriginals', async () => { try { return (await fsp.readdir(ORIGINALS())).filter(n => /\.zip$/i.test(n)); } catch (e) { return []; } });
 
 /* ---------- replacing a mod with your own copy ---------- */
 function gameRunning() {

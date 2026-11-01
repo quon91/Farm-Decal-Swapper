@@ -49,6 +49,7 @@
         <div class="toolbar">
           <span class="mono muted path" id="modsPath"></span>
           <input type="search" id="modSearch" placeholder="Search mods" aria-label="Search mods">
+          <div class="segs" id="modFilter" role="group" aria-label="Show"><button type="button" data-f="all">All <span></span></button><button type="button" data-f="mine">Your copies <span></span></button><button type="button" data-f="logos">With your logos <span></span></button><button type="button" data-f="plain">Not edited <span></span></button></div>
         </div>
         <div class="modgrid" id="modGrid"></div>
       </div>
@@ -86,6 +87,7 @@
             <canvas id="view3d" aria-label="3D view of the model"></canvas>
             <div class="viewhint">Drag to turn · right-drag or Shift-drag to move the view · scroll to zoom · click to place · drag a logo to move it</div>
             <div class="viewstatus" id="viewStatus" hidden></div>
+            <button type="button" class="btn small snapbtn" id="btnSnap">Snapshot</button>
           </div>
           <div class="placeside">
             <div class="field" id="fPlaceModel"><label for="placeModel">Model</label><select id="placeModel"></select></div>
@@ -102,6 +104,16 @@
               <p class="muted hint" id="stInfo"></p>
             </div>
             <div class="field"><span class="lab">Stickers on this model</span><div class="stickers" id="stickerList"></div></div>
+            <div class="shoplogo" id="shopLogo">
+              <label class="check"><input type="checkbox" id="slOn"> <span><b>Pick the logo in the shop</b></span></label>
+              <p class="muted hint" id="slInfo"></p>
+              <div id="slBody" hidden>
+                <div class="field"><label for="slTitle">Name of the choice in the shop</label><input type="text" id="slTitle" maxlength="40"></div>
+                <div class="field"><span class="lab">Logos to choose from</span><div class="logoPick" id="slLogos"></div></div>
+                <label class="check"><input type="checkbox" id="slNone" checked> <span>Add a “No logo” choice</span></label>
+                <div class="field"><label for="slDef">Selected when you buy it</label><select id="slDef"></select></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -239,6 +251,33 @@
 </div>
 
 <!-- ======= background remover ======= -->
+<div class="overlay" id="snapDlg" hidden>
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="snapTitle">
+    <div class="stage">
+      <div class="bar"><span class="muted" style="font-size:.8rem">Drag the logo to move it. Turn the model in the 3D view first to pick the angle.</span></div>
+      <div class="canvasWrap checker"><canvas id="snapCanvas"></canvas></div>
+    </div>
+    <div class="side2">
+      <div class="head"><div style="min-width:0"><div class="eyebrow">Snapshot</div><h2 id="snapTitle" style="font-size:1.05rem">Picture with your logo</h2></div></div>
+      <div class="field"><label for="snapSize">Picture size</label><select id="snapSize">
+        <option value="1920x1080">1920 × 1080 · stream, YouTube thumbnail</option><option value="1280x720">1280 × 720</option>
+        <option value="1080x1080">1080 × 1080 · square post</option><option value="1080x1920">1080 × 1920 · phone, shorts</option><option value="3840x2160">3840 × 2160 · 4K</option></select></div>
+      <div class="field"><label for="snapBg">Background</label><select id="snapBg">
+        <option value="sunset">Sunset</option><option value="field">Farm green</option><option value="studio">Light grey</option><option value="dark">Dark</option><option value="clear">See-through</option></select></div>
+      <div class="field"><label for="snapLogo">Logo on the picture</label><select id="snapLogo"></select></div>
+      <div class="field"><label for="snapScale">Logo size <span class="mono" id="snapScaleV"></span></label><input type="range" id="snapScale" min="5" max="70" value="22"></div>
+      <div class="field"><label for="snapAlpha">Logo opacity <span class="mono" id="snapAlphaV"></span></label><input type="range" id="snapAlpha" min="20" max="100" value="100"></div>
+      <div class="field"><span class="lab">Logo position</span><div class="snappos" id="snapPos">
+        <button type="button" data-p="tl" aria-label="Top left">↖</button><button type="button" data-p="tc" aria-label="Top centre">↑</button><button type="button" data-p="tr" aria-label="Top right">↗</button>
+        <button type="button" data-p="bl" aria-label="Bottom left">↙</button><button type="button" data-p="bc" aria-label="Bottom centre">↓</button><button type="button" data-p="br" aria-label="Bottom right">↘</button></div></div>
+      <label class="check"><input type="checkbox" id="snapShadow" checked> <span>Soft shadow behind the logo</span></label>
+      <div class="edacts" style="margin-top:auto">
+        <button type="button" class="btn primary" id="snapSave">Save picture</button>
+        <button type="button" class="btn" id="snapClose">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="overlay" id="bgDlg" hidden>
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="bgTitle">
     <div class="stage">

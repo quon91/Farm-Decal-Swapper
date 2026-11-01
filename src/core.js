@@ -671,6 +671,42 @@ function tagModTitle(src, tag) {
   return src.slice(0, m.index) + '<title>' + inner + '</title>' + src.slice(m.index + m[0].length);
 }
 
+/* ================= shop choices that switch parts on and off ================= */
+const SCENE_TAGS = new Set(['Shape', 'TransformGroup', 'Light', 'Camera', 'Dynamic', 'AudioSource']);
+/** i3d index path of every scene node ("0>3|0|0|4"), as vehicle XML i3dMappings use. Map(nodeId -> path). */
+function nodePaths(doc) {
+  const root = find(doc, 'i3D') || doc, sc = find(root, 'Scene'), out = new Map(); if (!sc) return out;
+  sc.children.filter(c => SCENE_TAGS.has(c.tag)).forEach((c, ci) => {
+    out.set(c.attrs.nodeId, ci + '>');
+    (function walk(el, p) { el.children.filter(k => SCENE_TAGS.has(k.tag)).forEach((k, i) => { const q = p ? p + '|' + i : String(i); out.set(k.attrs.nodeId, ci + '>' + q); walk(k, q); }); })(c, '');
+  });
+  return out;
+}
+const sceneChildCount = el => el.children.filter(k => SCENE_TAGS.has(k.tag)).length;
+/** Vehicle XML: the i3d it loads (mod-root relative), or null. */
+function vehicleI3d(src) { if (!/<vehicle[\s>]/.test(src)) return null; const m = src.match(/<base>[\s\S]*?<filename>\s*([^<]+?)\s*<\/filename>/); return m ? normPath(m[1].replace(/^\$moddir\$[^/\\]*[/\\]?/i, '')) : null; }
+const DESIGN_SETS = ['design8', 'design7', 'design6', 'design5', 'design4', 'design3', 'design2', 'design'];
+/** First design configuration slot (base game has design..design8) that this vehicle XML doesn't use yet. */
+function freeDesignSlot(src) { for (const d of DESIGN_SETS) if (!new RegExp('<' + d + 'Configurations[\\s>]').test(src)) return d; return null; }
+/**
+ * Add a shop choice that shows one group of nodes per option.
+ * options: [{ name, mappings: [ids], isDefault }]; mappings: [{ id, path }] added to <i3dMappings>.
+ */
+function addSwitchConfig(src, slot, title, options, mappings) {
+  const nl = src.includes('\r\n') ? '\r\n' : '\n', end = src.lastIndexOf('</vehicle>'); if (end < 0) throw new Error('not a vehicle file');
+  const ind = '    ', i2 = ind + ind, i3 = i2 + ind;
+  let out = src;
+  const maps = mappings.map(m => `${i2}<i3dMapping id="${escAttr(m.id)}" node="${escAttr(m.path)}" />${nl}`).join('');
+  const mi = out.lastIndexOf('</i3dMappings>');
+  if (mi >= 0) { const ls = out.lastIndexOf('\n', mi) + 1; out = out.slice(0, ls) + maps + out.slice(ls); }
+  else { const e2 = out.lastIndexOf('</vehicle>'), ls = out.lastIndexOf('\n', e2) + 1; out = out.slice(0, ls) + `${ind}<i3dMappings>${nl}${maps}${ind}</i3dMappings>${nl}` + out.slice(ls); }
+  const item = slot + 'Configuration';
+  const block = `${ind}<${slot}Configurations title="${escAttr(title)}">${nl}` + options.map(o => `${i2}<${item} name="${escAttr(o.name)}" price="0"${o.isDefault ? ' isDefault="true"' : ''}>${nl}` +
+    o.mappings.map(id => `${i3}<objectChange node="${escAttr(id)}" visibilityActive="true" visibilityInactive="false" />${nl}`).join('') + `${i2}</${item}>${nl}`).join('') + `${ind}</${slot}Configurations>${nl}`;
+  const e3 = out.lastIndexOf('</vehicle>'), ls3 = out.lastIndexOf('\n', e3) + 1;
+  return out.slice(0, ls3) + block + out.slice(ls3);
+}
+
 /* ================= adding new geometry (stickers) ================= */
 /**
  * Build the plain (unencrypted) bytes of a one-material shape for an .i3d.shapes file (format version 10).
@@ -856,7 +892,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

@@ -16,5 +16,6 @@ contextBridge.exposeInMainWorld('fds', {
   saveFile: opts => call('saveFile', opts),
   replaceOriginal: opts => call('replaceOriginal', opts),
   originalsDir: () => call('originalsDir'),
+  listOriginals: () => call('listOriginals'),
   pathForFile: file => { try { return webUtils.getPathForFile(file); } catch (e) { return null; } },
 });
