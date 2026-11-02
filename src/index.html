@@ -160,6 +160,11 @@
       </header>
       <div class="libgrid" id="lib"></div>
       <p class="muted tip">Tip: inside a mod, open any texture, mark a logo with your mouse and choose <b>Add area to library</b>. For JPGs or logos on a solid colour, use <b>Remove background</b>.</p>
+      <div class="picsec">
+        <div class="row-between"><div><h2>My pictures <span class="muted" id="picCount"></span></h2><p class="muted">Photos, screenshots and 3D views to use in the Logo maker. Plain backgrounds are cut out when you add them.</p></div>
+          <div><label class="btn" for="upPic">Add pictures</label><input type="file" id="upPic" accept="image/png,image/webp,image/jpeg" multiple hidden></div></div>
+        <div class="libgrid" id="picGrid"></div>
+      </div>
     </section>
 
     <!-- ======= LOGO MAKER ======= -->
@@ -175,7 +180,8 @@
           <div class="field"><label for="lmTemplate">Layout</label><select id="lmTemplate"></select></div>
           <div class="field"><label for="lmPic">Picture</label><select id="lmPic"></select></div>
           <div class="field photofield"><span class="lab">Or use a real picture</span>
-            <div class="row-wrap"><button type="button" class="btn small" id="lmPhotoBtn">Photo or screenshot…</button><button type="button" class="btn small" id="lmShot">From a mod's 3D view</button><button type="button" class="btn small" id="lmPhotoClear" hidden>Use drawn picture</button></div>
+            <div id="lmPicsWrap" hidden><span class="muted hint">My pictures</span><div class="picstrip" id="lmPics"></div></div>
+            <div class="row-wrap"><button type="button" class="btn small" id="lmPhotoBtn">Photo or screenshot…</button><button type="button" class="btn small" id="lmShot">From a mod's 3D view</button><button type="button" class="btn small" id="lmPhotoClear" hidden>Use drawn picture</button><button type="button" class="btn small" id="lmPicSave" hidden>Save to My pictures</button></div>
             <input type="file" id="lmPhotoIn" accept="image/png,image/jpeg,image/webp" hidden>
             <div id="lmPhotoOpts" hidden>
               <select id="lmPhotoMode" aria-label="How the picture sits"><option value="cutout">Cut out (no background)</option><option value="fill">Fill the frame (keep background)</option></select>

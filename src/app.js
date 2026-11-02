@@ -220,7 +220,12 @@ $('btnCloseMod').onclick = () => { if (changeCount() && !confirmDiscard()) retur
 window.addEventListener('beforeunload', e => { if (S.mod && changeCount() && !APP) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ================= logo library ================= */
-function idb() { return new Promise((res) => { try { const r = indexedDB.open('farm-decal-swapper', 1); r.onupgradeneeded = () => r.result.createObjectStore('library', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => res(null); } catch (e) { res(null); } }); }
+function idb() { return new Promise((res) => { try { const r = indexedDB.open('farm-decal-swapper', 2); // v2 adds "pictures"; existing logos are kept
+  r.onupgradeneeded = () => { const db = r.result; if (!db.objectStoreNames.contains('library')) db.createObjectStore('library', { keyPath: 'id' }); if (!db.objectStoreNames.contains('pictures')) db.createObjectStore('pictures', { keyPath: 'id' }); };
+  r.onsuccess = () => res(r.result); r.onerror = () => res(null); } catch (e) { res(null); } }); }
+async function picAll() { const db = await idb(); if (!db) return []; return new Promise(res => { try { const q = db.transaction('pictures').objectStore('pictures').getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => res([]); } catch (e) { res([]); } }); }
+async function picPut(rec) { const db = await idb(); if (!db) return; try { db.transaction('pictures', 'readwrite').objectStore('pictures').put(rec); } catch (e) {} }
+async function picDel(id) { const db = await idb(); if (!db) return; try { db.transaction('pictures', 'readwrite').objectStore('pictures').delete(id); } catch (e) {} }
 async function dbAll() { const db = await idb(); if (!db) return null; return new Promise(res => { try { const q = db.transaction('library').objectStore('library').getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => res(null); } catch (e) { res(null); } }); }
 async function dbPut(rec) { const db = await idb(); if (!db) return; try { db.transaction('library', 'readwrite').objectStore('library').put(rec); } catch (e) {} }
 async function dbDel(id) { const db = await idb(); if (!db) return; try { db.transaction('library', 'readwrite').objectStore('library').delete(id); } catch (e) {} }
@@ -284,6 +289,39 @@ function renderLib() {
     box.appendChild(el);
   });
 }
+/* ---- My pictures: photos, screenshots and 3D views for the Logo maker ---- */
+S.pics = [];
+function plainEdgeShare(c) { // how much of the border is one colour (a plain backdrop)
+  const W = c.width, H = c.height, d = c.getContext('2d').getImageData(0, 0, W, H).data, bg = edgeColor(c); let n = 0, k = 0;
+  const at = (x, y) => { const i = (y * W + x) * 4; if (d[i + 3] < 128) { k++; n++; return; } n++; if (Math.hypot(d[i] - bg[0], d[i + 1] - bg[1], d[i + 2] - bg[2]) < 40) k++; };
+  for (let x = 0; x < W; x += 2) { at(x, 0); at(x, H - 1); } for (let y = 0; y < H; y += 2) { at(0, y); at(W - 1, y); } return k / n;
+}
+function fitPic(c, max = 1600) { const k = Math.min(1, max / Math.max(c.width, c.height)); if (k === 1) return c; const o = document.createElement('canvas'); o.width = Math.round(c.width * k); o.height = Math.round(c.height * k); const g = o.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(c, 0, 0, o.width, o.height); return o; }
+async function addPicture(canvas, name, opts = {}) {
+  let c = fitPic(canvas), cut = edgeIsClear(c);
+  if (!cut && opts.autoCut !== false && plainEdgeShare(c) > 0.7) { c = trimCanvas(removeBackground(c, edgeColor(c), 40, 14, false)); cut = true; } // plain backdrop: cut it out
+  const rec = { id: 'pic' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: name || 'Picture', canvas: c, cut, order: S.pics.length };
+  S.pics.push(rec); await picPut({ id: rec.id, name: rec.name, image: await canvasBlob(c), cut, order: rec.order }); return rec;
+}
+async function loadPictures() { for (const r of (await picAll()).sort((a, b) => a.order - b.order)) { try { const c = await blobToCanvas(r.image); S.pics.push({ id: r.id, name: r.name, canvas: c, cut: r.cut, order: r.order }); } catch (e) {} } }
+function renderPics() {
+  const box = $('picGrid'); if (!box) return; box.innerHTML = '';
+  if (!S.pics.length) box.innerHTML = '<div class="empty" style="grid-column:1/-1">No pictures yet. Add photos of your own equipment, animals or buildings, or in-game screenshots. You can also save the 3D view of any mod from the Logo maker.</div>';
+  S.pics.forEach((p, i) => {
+    const el = document.createElement('div'); el.className = 'libcard';
+    el.innerHTML = `<div class="pv checker"><img alt=""></div><div class="body"><input type="text" aria-label="Picture name"><span class="dim"></span><div class="acts"><button type="button" class="btn small" data-a="use">Use in Logo maker</button><button type="button" class="btn small danger" data-a="del">Delete</button></div></div>`;
+    el.querySelector('img').src = thumbURL(p.canvas); const nm = el.querySelector('input'); nm.value = p.name;
+    nm.addEventListener('change', async () => { p.name = nm.value.trim() || 'Picture'; nm.value = p.name; await picPut({ id: p.id, name: p.name, image: await canvasBlob(p.canvas), cut: p.cut, order: p.order }); renderMakerPics(); });
+    el.querySelector('.dim').textContent = `${p.canvas.width} × ${p.canvas.height} px · ${p.cut ? 'background cut out' : 'with background'}`;
+    el.querySelector('[data-a=use]').onclick = () => { setView('maker'); lmUsePicture(p); };
+    el.querySelector('[data-a=del]').onclick = () => { S.pics.splice(i, 1); picDel(p.id); renderPics(); renderMakerPics(); toast(`Deleted “${p.name}”.`); };
+    box.appendChild(el);
+  });
+  $('picCount').textContent = S.pics.length ? `(${S.pics.length})` : '';
+}
+$('upPic').addEventListener('change', async e => { const files = [...e.target.files]; e.target.value = ''; let n = 0;
+  for (const f of files) { try { await addPicture(await blobToCanvas(f), f.name.replace(/\.[^.]+$/, '')); n++; } catch (err) { toast(`“${f.name}” couldn’t be opened.`); } }
+  renderPics(); renderMakerPics(); if (n) toast(`${n} picture${n === 1 ? '' : 's'} added.`); });
 function refreshLogos() { if (S.mod) { renderOpts(); repaintCards(); updateChanges(); if (S.mod.place) { fillPlaceLogos(); drawStickers(); } } if (S.current) { refreshEditorLogos(); drawEditor(); } }
 
 /* ---- library packs (zip of PNGs + names) ---- */
@@ -291,7 +329,8 @@ $('btnExportPack').onclick = async () => {
   if (!S.lib.length) { toast('Your library is empty.'); return; }
   const z = new JSZip(), meta = [];
   for (const l of S.lib) { const f = `logos/${Core.slug(l.name)}_${l.id.slice(-4)}.png`; z.file(f, await canvasBlob(l.canvas)); meta.push({ name: l.name, file: f, order: l.order, recipe: l.recipe || undefined }); }
-  z.file('library.json', JSON.stringify({ app: 'Farm Decal Swapper', version: 1, logos: meta }, null, 2));
+  const pics = []; for (const p of S.pics) { const f = `pictures/${Core.slug(p.name)}_${p.id.slice(-4)}.png`; z.file(f, await canvasBlob(p.canvas)); pics.push({ name: p.name, file: f, cut: p.cut }); }
+  z.file('library.json', JSON.stringify({ app: 'Farm Decal Swapper', version: 1, logos: meta, pictures: pics }, null, 2));
   const blob = await z.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   try { const r = await offerFile('logo-library.zip', blob, 'zip'); if (r === 'saved') toast('Library exported.'); } catch (e) { toast('Couldn’t save: ' + e.message); }
 };
@@ -299,12 +338,16 @@ $('btnImportPack').onclick = () => $('packIn').click();
 $('packIn').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
   try {
-    const z = await JSZip.loadAsync(f), metaF = z.file('library.json'); let list;
-    if (metaF) list = JSON.parse(await metaF.async('string')).logos || [];
+    const z = await JSZip.loadAsync(f), metaF = z.file('library.json'); let list, picList = [];
+    if (metaF) { const meta = JSON.parse(await metaF.async('string')); list = meta.logos || []; picList = meta.pictures || []; }
     else list = Object.keys(z.files).filter(n => /\.(png|webp|jpe?g)$/i.test(n)).map(n => ({ name: baseName(n).replace(/\.[^.]+$/, ''), file: n }));
-    let n = 0;
-    for (const it of list) { const zf = z.file(it.file); if (!zf) continue; const blob = new Blob([await zf.async('uint8array')], { type: 'image/png' }); const rec = await addLogo(blob, it.name, { cleaned: true }); rec.needsBg = false; rec.recipe = it.recipe || null; await saveRec(rec); n++; }
-    renderLib(); refreshLogos(); toast(`${n} logo${n === 1 ? '' : 's'} imported.`);
+    let n = 0, skipped = 0;
+    for (const it of list) { const zf = z.file(it.file); if (!zf) continue; const blob = new Blob([await zf.async('uint8array')], { type: 'image/png' }); const rec = await addLogo(blob, it.name, { cleaned: true });
+      if (S.lib.some(l => l !== rec && l.name.toLowerCase() === rec.name.toLowerCase() && l.canvas.width === rec.canvas.width && l.canvas.height === rec.canvas.height)) { S.lib.pop(); skipped++; continue; } // already have it
+      rec.needsBg = false; rec.recipe = it.recipe || null; await saveRec(rec); n++; }
+    let np = 0; for (const it of picList) { const zf = z.file(it.file); if (!zf) continue; const c = await blobToCanvas(new Blob([await zf.async('uint8array')], { type: 'image/png' }));
+      if (S.pics.some(p => p.name.toLowerCase() === String(it.name).toLowerCase() && p.canvas.width === c.width && p.canvas.height === c.height)) { skipped++; continue; } const rec = await addPicture(c, it.name, { autoCut: false }); rec.cut = !!it.cut; await picPut({ id: rec.id, name: rec.name, image: await canvasBlob(rec.canvas), cut: rec.cut, order: rec.order }); np++; }
+    renderLib(); renderPics(); renderMakerPics(); refreshLogos(); toast(`${n} logo${n === 1 ? '' : 's'}${np ? ` and ${np} picture${np === 1 ? '' : 's'}` : ''} imported.${skipped ? ` ${skipped} you already had were skipped.` : ''}`);
   } catch (err) { toast('That file isn’t a logo pack: ' + err.message); }
 });
 
@@ -1293,7 +1336,8 @@ function initMaker() {
     const shot = S.viewer.snapshotAt(2048, 1536); if (sel) { S.mod.place.sel = sel; drawStickers(); }
     lmSetPhoto(trimCanvas(shot), (S.mod.title || S.mod.name) + ' (3D view)', false);
   };
-  $('lmPhotoClear').onclick = () => { LM.photo = null; LM.photoSrc = null; lmPhotoUI(); lmChanged(); };
+  $('lmPhotoClear').onclick = () => { LM.photo = null; LM.photoSrc = null; LM.picId = null; lmPhotoUI(); renderMakerPics(); lmChanged(); };
+  $('lmPicSave').onclick = lmSavePicture; renderMakerPics();
   $('lmPhotoMode').addEventListener('change', lmChanged);
   $('lmPhotoBg').addEventListener('change', lmPhotoProcess); $('lmPhotoTol').addEventListener('input', () => { clearTimeout(LM.ptimer); LM.ptimer = setTimeout(lmPhotoProcess, 120); });
   lmPhotoUI();
@@ -1301,7 +1345,7 @@ function initMaker() {
 function lmSetPhoto(canvas, name, plainBg) {
   const k = Math.min(1, 1600 / Math.max(canvas.width, canvas.height)), c = document.createElement('canvas'); // keep it a sensible size
   c.width = Math.round(canvas.width * k); c.height = Math.round(canvas.height * k); const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(canvas, 0, 0, c.width, c.height);
-  LM.photoSrc = c; LM.photoName = name; $('lmPhotoBg').checked = plainBg; $('lmPhotoMode').value = plainBg || edgeIsClear(c) ? 'cutout' : 'fill';
+  LM.photoSrc = c; LM.photoName = name; LM.picId = null; $('lmPhotoBg').checked = plainBg; $('lmPhotoMode').value = plainBg || edgeIsClear(c) ? 'cutout' : 'fill';
   lmPhotoProcess();
 }
 function lmPhotoProcess() {
@@ -1309,8 +1353,24 @@ function lmPhotoProcess() {
   if ($('lmPhotoBg').checked) { const src = document.createElement('canvas'); src.width = c.width; src.height = c.height; src.getContext('2d').drawImage(c, 0, 0); c = trimCanvas(removeBackground(src, edgeColor(src), +$('lmPhotoTol').value, 14, false)); }
   LM.photo = c; LM.photoUrl = c.toDataURL('image/png'); lmPhotoUI(); LM.nameEdited = false; lmChanged();
 }
+function renderMakerPics() {
+  const box = $('lmPics'); if (!box) return; box.innerHTML = '';
+  $('lmPicsWrap').hidden = !S.pics.length;
+  for (const p of S.pics) { const b = document.createElement('button'); b.type = 'button'; b.className = 'picthumb checker'; b.title = p.name; b.setAttribute('aria-label', 'Use ' + p.name); b.setAttribute('aria-pressed', LM.picId === p.id);
+    const im = document.createElement('img'); im.alt = ''; im.src = thumbURL(p.canvas); b.appendChild(im); b.onclick = () => lmUsePicture(p); box.appendChild(b); }
+}
+function lmUsePicture(p) {
+  initMaker(); LM.photoSrc = p.canvas; LM.photoName = p.name; LM.picId = p.id; $('lmPhotoBg').checked = false; $('lmPhotoMode').value = p.cut ? 'cutout' : 'fill';
+  lmPhotoProcess(); renderMakerPics();
+}
+async function lmSavePicture() {
+  if (!LM.photo) return; const rec = await addPicture(LM.photo, LM.photoName || 'Picture', { autoCut: false }); rec.cut = $('lmPhotoMode').value === 'cutout';
+  await picPut({ id: rec.id, name: rec.name, image: await canvasBlob(rec.canvas), cut: rec.cut, order: rec.order });
+  LM.picId = rec.id; renderPics(); renderMakerPics(); lmPhotoUI(); toast(`“${rec.name}” saved to My pictures.`);
+}
 function lmPhotoUI() {
   const on = !!LM.photo; $('lmPhotoOpts').hidden = !on; $('lmPhotoClear').hidden = !on; $('lmPic').disabled = on;
+  $('lmPicSave').hidden = !on || (LM.picId && !$('lmPhotoBg').checked);
   $('fPhotoTol').hidden = !$('lmPhotoBg').checked; $('lmPhotoTolV').textContent = $('lmPhotoTol').value;
   $('lmPhotoInfo').textContent = on ? `Using “${LM.photoName}”. Only use pictures you own or have permission to use.` : 'Use your own photos or in-game screenshots for real equipment, animals and buildings.';
 }
@@ -1411,6 +1471,7 @@ async function lmPng() {
     }
     store.set('seededIds', JSON.stringify(done)); store.set('seeded', '1');
   }
+  await loadPictures(); renderPics();
   renderLib(); setView('mods'); loadModsFolder();
 })();
 })();

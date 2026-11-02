@@ -44,6 +44,8 @@ The app isn't code-signed, so Windows SmartScreen may say *Windows protected you
 
 Go to **Logo maker**, click a starting point (Farm, Construction, Landscaping, Livestock, Hauling, Timber, Grain or Licence plate), then change the layout, picture, words, lettering and colours. **White** and **Black** make one-colour versions for dark and light paint. **Add to library** puts it straight into your Logo library. Logos made in the Logo maker keep their settings: in the Logo library, click **Edit in Logo maker** to change the words, lettering, colours or picture, then **Save changes** (or **Add as new** to keep both). Logo packs carry these settings too.
 
+**My pictures** (at the bottom of the Logo library) keeps photos, in-game screenshots and 3D views of your mods for the Logo maker. Click **Add pictures**, or in the Logo maker click **Save to My pictures** after loading a photo or **From a mod's 3D view**. Plain backgrounds are cut out when you add them. Packs export and import your pictures too, and skip anything you already have.
+
 ### Good to know
 
 - **Hidden decals that show black in game:** some models don't support see-through on that part. Open the texture again and use **Colour** to match the paint instead.
