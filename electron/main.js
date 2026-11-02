@@ -126,6 +126,32 @@ async function retargetSavegames(oldName, newName, backupRoot) {
   }
   return out;
 }
+/* ---------- edited mods that still use their ModHub file name ---------- */
+ipcMain.handle('gameRunning', () => gameRunning());
+ipcMain.handle('scanEdited', async (_e, { dir, tag }) => {
+  const t = String(tag || '').toLowerCase(), out = [];
+  let backups = []; try { backups = (await fsp.readdir(BACKUPS())).map(n => n.toLowerCase()); } catch (e) {}
+  for (const d of await fsp.readdir(dir, { withFileTypes: true })) {
+    if (!d.isFile() || !/\.zip$/i.test(d.name)) continue;
+    const full = path.join(dir, d.name), base = d.name.replace(/\.zip$/i, ''), lb = base.toLowerCase();
+    if (t && (lb.startsWith('fs25_' + t + '_') || lb.startsWith(t + '_') || lb.endsWith('_' + t))) continue; // already your copy
+    let decals = false, marker = false, md = null, lua = [];
+    try { const e = await readZipEntries(full, n => { if (/(^|\/)custom_decals\//i.test(n)) decals = true; if (/(^|\/)farm_decal_swapper\.txt$/i.test(n)) marker = true; return /(^|\/)moddesc\.xml$/i.test(n) || /\.lua$/i.test(n); });
+      for (const [k, v] of Object.entries(e)) { if (/moddesc\.xml$/i.test(k)) md = v.toString('utf8'); else lua.push(v.toString('utf8')); } } catch (e) { continue; }
+    if (!md) continue;
+    const reasons = [];
+    if (marker) reasons.push('was edited with Farm Decal Swapper');
+    else if (decals) reasons.push('has logos added by Farm Decal Swapper');
+    if (backups.some(b => b.startsWith(lb + '_20'))) reasons.push('was saved over by Farm Decal Swapper (a backup of it exists)');
+    const title = (md.match(/<title>[\s\S]*?<en>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/en>/i) || [])[1] || base;
+    out.push({ name: d.name, path: full, title: title.trim(), reasons, edited: reasons.length > 0, scriptsUseName: lua.some(s => s.includes(base)) });
+  }
+  return out;
+});
+ipcMain.handle('writeNewZip', async (_e, { dir, name, data }) => {
+  const p = safeJoin(dir, name); if (fs.existsSync(p)) return { error: 'exists', path: p };
+  const tmp = p + '.saving'; await fsp.writeFile(tmp, Buffer.from(data)); await fsp.rename(tmp, p); return { saved: true, path: p };
+});
 ipcMain.handle('replaceOriginal', async (_e, { oldPath, oldName, newName }) => {
   if (await gameRunning()) return { error: 'game-running' };
   const backupRoot = path.join(BACKUPS(), `Savegames before ${newName} ${stamp()}`);

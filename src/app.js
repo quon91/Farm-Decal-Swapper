@@ -110,8 +110,61 @@ async function loadModsFolder() {
     $('modGrid').innerHTML = ''; const d = document.createElement('div'); d.className = 'empty';
     d.textContent = /ENOENT/.test(e.message) ? 'There’s no mods folder at this location yet. Use Change folder to point at the folder where FS25 keeps your mods, or open a mod zip directly.' : 'This folder couldn’t be read (' + cleanErr(e) + '). Use Change folder to pick another one.';
     $('modGrid').appendChild(d); return; }
-  S.mods = list; try { S.originals = await APP.listOriginals(); } catch (e) { S.originals = []; } renderModGrid();
+  S.mods = list; try { S.originals = await APP.listOriginals(); } catch (e) { S.originals = []; } renderModGrid(); scanEdited();
 }
+/* ---- edited mods still using their ModHub name (the game asks to "update" them) ---- */
+async function scanEdited() {
+  if (!APP || !APP.scanEdited || !S.modsDir) return;
+  try { S.flagged = await APP.scanEdited({ dir: S.modsDir, tag: copyTag() }); } catch (e) { S.flagged = []; }
+  $('btnFixMods').hidden = !S.flagged.length;
+  const n = S.flagged.filter(f => f.edited).length; $('flagBar').hidden = !n; if (!n) return;
+  $('flagTitle').textContent = `${n} edited mod${n === 1 ? '' : 's'} still use${n === 1 ? 's' : ''} the ModHub file name. `;
+  $('flagText').textContent = 'The game will keep saying ' + (n === 1 ? 'it needs' : 'they need') + ' updating, and updating would wipe your logos.';
+}
+$('btnFixMods').onclick = () => $('flagFix').click();
+$('flagFix').onclick = () => {
+  const box = $('fixList'); box.innerHTML = '';
+  const list = S.flagged.slice().sort((a, b) => (b.edited - a.edited) || a.title.localeCompare(b.title));
+  list.forEach((f, i) => {
+    if (i === 0 && f.edited) box.insertAdjacentHTML('beforeend', '<div class="fixhead">Edited with this app</div>');
+    if (!f.edited && (i === 0 || list[i - 1].edited)) box.insertAdjacentHTML('beforeend', '<div class="fixhead">Other mods: tick any the game says need updating</div>');
+    const row = document.createElement('label'); row.className = 'fixrow';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = f.edited && !f.scriptsUseName; cb.dataset.path = f.path;
+    const t = document.createElement('div');
+    t.innerHTML = '<b></b><span class="mono muted"></span><span class="muted"></span>';
+    t.children[0].textContent = f.title; t.children[1].textContent = `${f.name} → ${copyName(f.name)}`;
+    t.children[2].textContent = (f.reasons.length ? f.reasons.join('; ') + '.' : 'No sign of edits from this app, but a mod edited elsewhere (or patched earlier) can still be flagged.') + (f.scriptsUseName ? ' Its scripts mention its own file name, so renaming it could break it.' : '');
+    row.append(cb, t); box.appendChild(row);
+  });
+  $('fixWhat').textContent = `For each ticked mod: it gets the new name and “(${copyTag()})” on its title, your savegames are switched to it (old savegame files are backed up first), and the old file goes to Documents\\Farm Decal Swapper\\Original mods. Close the game first.`;
+  $('fixMsg').hidden = true; $('fixGo').disabled = false; $('fixDlg').hidden = false;
+};
+$('fixClose').onclick = () => { $('fixDlg').hidden = true; };
+$('fixDlg').addEventListener('click', e => { if (e.target === $('fixDlg')) $('fixClose').click(); });
+$('fixGo').onclick = async () => {
+  const msg = $('fixMsg'), say = (t, err) => { msg.hidden = false; msg.className = 'savemsg' + (err ? ' err' : ''); msg.textContent = t; };
+  const picks = [...$('fixList').querySelectorAll('input:checked')].map(cb => S.flagged.find(f => f.path === cb.dataset.path));
+  if (!picks.length) { say('Tick at least one mod.', true); return; }
+  if (await APP.gameRunning()) { say('Farming Simulator 25 is running. Close it, then try again.', true); return; }
+  $('fixGo').disabled = true; const done = [], failed = [];
+  for (const f of picks) {
+    try {
+      say(`Making ${f.name} your copy…`); await tick();
+      const newName = copyName(f.name), z = await JSZip.loadAsync(await APP.readFile(f.path));
+      const mdKey = Object.keys(z.files).filter(k => /(^|\/)moddesc\.xml$/i.test(k)).sort((a, b) => a.length - b.length)[0];
+      if (mdKey) { const raw = await z.file(mdKey).async('uint8array'), bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF;
+        z.file(mdKey, new TextEncoder().encode((bom ? '\uFEFF' : '') + Core.tagModTitle(new TextDecoder().decode(raw).replace(/^\uFEFF/, ''), copyTag()))); }
+      const data = new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } }));
+      const w = await APP.writeNewZip({ dir: S.modsDir, name: newName, data });
+      if (w.error === 'exists') { failed.push(`${f.name}: ${newName} already exists. Delete or rename one of them first.`); continue; }
+      const r = await APP.replaceOriginal({ oldPath: f.path, oldName: f.name.replace(/\.zip$/i, ''), newName: newName.replace(/\.zip$/i, '') });
+      if (r.error) { failed.push(`${f.name}: ${r.error === 'game-running' ? 'the game started while fixing' : r.error}`); continue; }
+      done.push(`${newName}${r.savegames.length ? ` (switched ${r.savegames.map(s => s.savegame).join(', ')})` : ''}${r.dependents && r.dependents.length ? `; the old file stays because ${r.dependents.join(', ')} needs it` : ''}`);
+    } catch (e) { failed.push(`${f.name}: ${cleanErr(e)}`); }
+  }
+  say((done.length ? `Done: ${done.join(' · ')}. ` : '') + (failed.length ? `Not changed: ${failed.join(' · ')}` : 'Start the game; these won’t ask to update any more.'), failed.length && !done.length);
+  $('fixGo').disabled = false; loadModsFolder();
+};
 /* badges on mod cards */
 function modBadges(m) {
   const out = [], base = m.name.replace(/\.zip$/i, ''), mine = isCopyName(base);
@@ -709,7 +762,7 @@ function closeEditor() { const c = S.current; $('editor').hidden = true; S.curre
 $('edClose').onclick = closeEditor;
 $('edApply').onclick = () => { const c = S.current; S.mod.edits.set(c.t.path, c.ed); closeEditor(); renderFiles(); toast(`${flagText(c.ed)} applied to ${baseName(c.t.path)}. Save the mod when you’re done.`); };
 $('editor').addEventListener('click', e => { if (e.target === $('editor')) closeEditor(); });
-document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (!$('snapDlg').hidden) $('snapClose').click(); else if (!$('bgDlg').hidden) $('bgCancel').click(); else if (!$('editor').hidden) closeEditor(); });
+document.addEventListener('keydown', e => { if (e.key !== 'Escape') return; if (!$('fixDlg').hidden) $('fixClose').click(); else if (!$('snapDlg').hidden) $('snapClose').click(); else if (!$('bgDlg').hidden) $('bgCancel').click(); else if (!$('editor').hidden) closeEditor(); });
 $('edRemove').onclick = () => { const p = S.current.t.path; S.mod.edits.delete(p); $('editor').hidden = true; S.current = null; refreshCardFor(p); updateChanges(); toast('Changes to this texture undone.'); };
 document.querySelectorAll('#edMode button').forEach(b => b.onclick = () => { S.current.ed.mode = b.dataset.mode; if (b.dataset.mode !== 'image' || S.current.ed.image) commitEdit(); syncEditor(); });
 $('edPaint').oninput = e => { S.current.ed.paint = e.target.value; syncEditor(); };
@@ -1250,6 +1303,7 @@ async function saveMod() {
       }
     }
     const asCopy = savingCopy(), saveName = asCopy ? copyName(M.name) : M.name;
+    if (M.kind !== 'folder') changed.push({ rel: 'farm_decal_swapper.txt', data: new TextEncoder().encode(`Edited with Farm Decal Swapper on ${new Date().toISOString().slice(0, 10)}.\r\nThis is not the original ModHub file. To get the original back, download it again from ModHub.\r\n`) });
     if (asCopy) { const md = modDescPath(); if (md && !textOut.has(md)) textOut.set(md, Core.tagModTitle(xmlText(md), copyTag())); else if (md) textOut.set(md, Core.tagModTitle(textOut.get(md), copyTag())); }
     for (const [rel, s] of textOut) { const raw = M.files.get(rel) || await z.file(P + rel).async('uint8array'); const bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF; changed.push({ rel, data: new TextEncoder().encode((bom ? '﻿' : '') + s) }); }
 

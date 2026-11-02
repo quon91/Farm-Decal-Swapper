@@ -302,3 +302,16 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .picthumb{width:64px;height:64px;padding:3px;border:1px solid var(--line);border-radius:8px;cursor:pointer;display:grid;place-items:center}
 .picthumb img{max-width:100%;max-height:100%;display:block}
 .picthumb[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+
+/* edited ModHub mods */
+.flagbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;margin:0 0 14px;border-radius:var(--r);background:var(--accent-soft);font-size:.9rem}
+.flagbar[hidden]{display:none}
+.dlgbox{background:var(--surface);border:1px solid var(--line);border-radius:14px;width:min(720px,100%);padding:20px;display:flex;flex-direction:column;gap:12px}
+.dlgbox h2{margin:0;font-size:1.15rem}
+.fixlist{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.fixrow{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:start;padding:10px 12px;border-top:1px solid var(--line);cursor:pointer}
+.fixrow:first-child{border-top:0}
+.fixrow div{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:.88rem}
+.fixrow .mono{overflow-wrap:anywhere;font-size:.78rem}
+.fixhead{padding:8px 12px;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--sunk)}
+.fixhead + .fixrow{border-top:0}

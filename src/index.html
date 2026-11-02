@@ -52,6 +52,8 @@
           <input type="search" id="modSearch" placeholder="Search mods" aria-label="Search mods">
           <div class="segs" id="modFilter" role="group" aria-label="Show"><button type="button" data-f="all">All <span></span></button><button type="button" data-f="mine">Your copies <span></span></button><button type="button" data-f="logos">With your logos <span></span></button><button type="button" data-f="plain">Not edited <span></span></button></div>
         </div>
+        <div class="row-wrap" style="margin:-4px 0 12px"><button type="button" class="btn small" id="btnFixMods" hidden>Fix “needs updating” mods</button></div>
+        <div class="flagbar" id="flagBar" hidden><div><b id="flagTitle"></b><span class="muted" id="flagText"></span></div><button type="button" class="btn small primary" id="flagFix">Review and fix</button></div>
         <div class="modgrid" id="modGrid"></div>
       </div>
     </section>
@@ -303,6 +305,16 @@
 </div>
 
 <!-- ======= background remover ======= -->
+<div class="overlay" id="fixDlg" hidden>
+  <div class="dlgbox" role="dialog" aria-modal="true" aria-labelledby="fixHead">
+    <h2 id="fixHead">Stop the “needs updating” message</h2>
+    <p class="muted">The game knows a ModHub mod by its zip file name. These mods were edited but still use that name, so the game keeps saying they need updating, and updating them would wipe your logos. Making them your own copy gives each a new name.</p>
+    <div id="fixList" class="fixlist"></div>
+    <p class="muted hint" id="fixWhat"></p>
+    <div class="edacts"><button type="button" class="btn primary" id="fixGo">Make the ticked mods my copies</button><button type="button" class="btn" id="fixClose">Not now</button></div>
+    <p class="savemsg" id="fixMsg" hidden></p>
+  </div>
+</div>
 <div class="overlay" id="snapDlg" hidden>
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="snapTitle">
     <div class="stage">
