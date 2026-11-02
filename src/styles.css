@@ -273,3 +273,20 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .shoplogo{border:1px solid var(--line);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--surface)}
 .shoplogo #slBody{display:flex;flex-direction:column;gap:10px}
 .shoplogo #slBody[hidden]{display:none}
+
+/* logo maker */
+.ico-make{border-radius:50%;box-shadow:inset 0 0 0 3px var(--field),inset 0 0 0 5px currentColor}
+.makerpresets{margin:0 0 14px}
+.maker{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
+@media (max-width:900px){.maker{grid-template-columns:minmax(0,1fr)}}
+.makerview{border-radius:var(--r);border:1px solid var(--line);display:grid;place-items:center;padding:18px;min-height:320px;position:sticky;top:12px}
+.makerview canvas{max-width:100%;max-height:70vh;display:block}
+.makerside{display:flex;flex-direction:column;gap:12px;min-width:0}
+.makerside input[type=text],.makerside select{width:100%}
+.swatches{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:.78rem;color:var(--muted)}
+.swatches label{display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.swatches input[type=color]{width:46px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer}
+
+.row-wrap{display:flex;flex-wrap:wrap;gap:6px}
+.photofield #lmPhotoOpts{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.photofield #lmPhotoOpts[hidden]{display:none}

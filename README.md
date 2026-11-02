@@ -8,6 +8,8 @@ Put your farm logo on Farming Simulator 25 mods, swap or hide any texture, and a
 - **Puts your logo on them, sized correctly.** Decals are often stretched on the model. The app corrects for that, so your logo comes out with the right proportions.
 - **Adds logos where there were none.** Open the 3D view, click anywhere on the model and a logo sticker lands right there. Set its size and angle, nudge it into place, and tick one box to put a matching one on the other side.
 - **Lets you pick placed logos in the shop.** Turn on *Pick the logo in the shop* and the vehicle's configure screen gets a "Farm logo" choice: any logos you tick, or none.
+- **Adds licence plates.** Click the back or front of a vehicle with *Licence plate* selected and the game puts its own plate there; you type the plate text in the shop.
+- **Makes logos.** The Logo maker builds a logo from a layout (seal, shield, oval, patch, door logo, horizontal, name only, licence plate), a picture (Delta farm scenes, cotton, rice, mallards, bins, excavator, hard hat, oak, bull, semi, pines, wheat), your words and colours, and adds it to your library at 2048 px.
 - **Takes pictures.** The Snapshot button saves the 3D view as a picture with your logo on it, for thumbnails, posts and stream graphics.
 - **Adds shop choices.** Many vehicles have a decal option in the shop, like door logos. You can tick any logos from your library to add each one as a new choice, and pre-select one.
 - **Swaps, hides or paints any texture.** Replace part or all of a texture with a picture, make a decal see-through, or paint it one flat colour.
@@ -38,11 +40,16 @@ The app isn't code-signed, so Windows SmartScreen may say *Windows protected you
 4. **Save the mod.** The app suggests saving over the original. A backup goes to `Documents\Farm Decal Swapper\Backups` first. For a ModHub mod, save it as your own copy (see below).
 5. **Start the game.** New shop choices appear at the end of the list in the configure screen.
 
+### Logo maker
+
+Go to **Logo maker**, click a starting point (Farm, Construction, Landscaping, Livestock, Hauling, Timber, Grain or Licence plate), then change the layout, picture, words, lettering and colours. **White** and **Black** make one-colour versions for dark and light paint. **Add to library** puts it straight into your Logo library.
+
 ### Good to know
 
 - **Hidden decals that show black in game:** some models don't support see-through on that part. Open the texture again and use **Colour** to match the paint instead.
 - **Placed logos:** each one is a thin sticker that follows the surface 4 mm off the part you clicked, so it moves with that part (a logo on a door opens with the door). It always shows; it isn't a shop choice. It stays on the part you clicked, so a logo that runs past the edge of a door is trimmed there.
 - **ModHub mods say they need an update:** the game compares ModHub mods with the official file, and an edited one no longer matches. Updating it downloads the original over your changes. In *Settings → Your own copies*, type a short name tag (for example your farm's initials) and tick **Always save edited mods as my own copy**: `FS25_Workstar_Pack` is saved as `FS25_DBF_Workstar_Pack`, so the game treats it as a separate mod. Also tick **move the original out of the mods folder and switch my savegames to my copy** and the app moves the original to `Documents\Farm Decal Swapper\Original mods` and points your savegames at your copy, so vehicles and buildings you already own keep working. Savegame files are backed up first, and the original stays put if another mod needs it. Close the game before saving.
+- **Licence plates:** the app adds a plate mount under the part you click and lists it in the vehicle's `<licensePlates>`. The plate style comes from the map you play on.
 - **Logo choice in the shop:** uses one of the game's eight design choices (`design` to `design8`) that the vehicle isn't using yet. Buildings have no configure screen, so their placed logos always show.
 - **Quality:** *Settings → Texture quality* switches between **Best** (no loss, a few MB per logo texture) and **Smaller files** (DXT5).
 - **Moving your library:** **Export pack** saves your logo library as one zip, and **Import pack** loads it on another PC.

@@ -12,7 +12,7 @@ function FDSViewer(canvas) {
   const sun = new THREE.DirectionalLight(0xffffff, 0.75); camera.add(sun); sun.position.set(0.4, 0.8, 0.3); scene.add(camera);
   const root = new THREE.Group(); scene.add(root);
   const stickerGroup = new THREE.Group(); scene.add(stickerGroup);
-  let meshes = [], disposed = false, needs = true, onPick = null, onSelect = null, onDrag = null, bg = '#d9ded3', modelSize = 0;
+  let meshes = [], disposed = false, needs = true, onPick = null, onSelect = null, onDrag = null, bg = '#d9ded3', modelSize = 0, modelCenter = [0, 0, 0];
   const ray = new THREE.Raycaster();
 
   /* ---------- orbit camera ---------- */
@@ -139,7 +139,7 @@ function FDSViewer(canvas) {
   }
   function fit() {
     const box = new THREE.Box3(); for (const m of meshes) box.expandByObject(m);
-    if (box.isEmpty()) return; const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length(); modelSize = s;
+    if (box.isEmpty()) return; const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length(); modelSize = s; modelCenter = c.toArray();
     orbit.target.copy(c); orbit.dist = s * 1.15; camera.near = Math.max(0.005, s / 2000); camera.far = s * 50; camera.updateProjectionMatrix(); placeCamera();
   }
 
@@ -195,7 +195,7 @@ function FDSViewer(canvas) {
   return {
     load, setStickers, castAt, worldMatrixOf, meshData, focus, fit,
     set onPick(f) { onPick = f; }, set onSelect(f) { onSelect = f; }, set onDrag(f) { onDrag = f; },
-    get modelSize() { return modelSize; },
+    get modelSize() { return modelSize; }, get modelCenter() { return modelCenter; },
     setBackground(c) { bg = c; needs = true; },
     snapshot() { renderer.render(scene, camera); return canvas.toDataURL('image/png'); },
     /** Render the current view at w×h with a see-through background; returns a 2D canvas. */

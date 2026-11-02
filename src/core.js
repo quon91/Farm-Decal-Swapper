@@ -707,6 +707,28 @@ function addSwitchConfig(src, slot, title, options, mappings) {
   return out.slice(0, ls3) + block + out.slice(ls3);
 }
 
+/** XYZ Euler angles in degrees (R = Rz·Ry·Rx, as i3d rotation) from a column-major 4x4 matrix without scale. */
+function matToEuler(R) {
+  const d = 180 / Math.PI, sy = Math.max(-1, Math.min(1, -R[2]));
+  const y = Math.asin(sy);
+  if (Math.abs(Math.cos(y)) > 1e-6) return [Math.atan2(R[6], R[10]) * d, y * d, Math.atan2(R[1], R[0]) * d];
+  return [0, y * d, Math.atan2(-R[4], R[5]) * d];
+}
+/** Add licence plate mounts to a vehicle XML. plates: [{ id, path, position: 'BACK'|'FRONT', type: 'SQUARISH'|'ELONGATED' }] */
+function addLicensePlates(src, plates) {
+  const nl = src.includes('\r\n') ? '\r\n' : '\n', ind = '    ', i2 = ind + ind;
+  let out = src;
+  const maps = plates.map(m => `${i2}<i3dMapping id="${escAttr(m.id)}" node="${escAttr(m.path)}" />${nl}`).join('');
+  const mi = out.lastIndexOf('</i3dMappings>');
+  if (mi >= 0) { const ls = out.lastIndexOf('\n', mi) + 1; out = out.slice(0, ls) + maps + out.slice(ls); }
+  else { const e = out.lastIndexOf('</vehicle>'), ls = out.lastIndexOf('\n', e) + 1; out = out.slice(0, ls) + `${ind}<i3dMappings>${nl}${maps}${ind}</i3dMappings>${nl}` + out.slice(ls); }
+  const rows = plates.map(p => `${i2}<licensePlate node="${escAttr(p.id)}" position="${p.position === 'FRONT' ? 'FRONT' : 'BACK'}" preferedType="${p.type === 'ELONGATED' ? 'ELONGATED' : 'SQUARISH'}" placementArea="0.06 0.27 0.1 0.27" />${nl}`).join('');
+  const lc = out.lastIndexOf('</licensePlates>');
+  if (lc >= 0) { const ls = out.lastIndexOf('\n', lc) + 1; return out.slice(0, ls) + rows + out.slice(ls); }
+  const e = out.lastIndexOf('</vehicle>'), ls = out.lastIndexOf('\n', e) + 1;
+  return out.slice(0, ls) + `${ind}<licensePlates defaultPlacement="BOTH">${nl}${rows}${ind}</licensePlates>${nl}` + out.slice(ls);
+}
+
 /* ================= adding new geometry (stickers) ================= */
 /**
  * Build the plain (unencrypted) bytes of a one-material shape for an .i3d.shapes file (format version 10).
@@ -892,7 +914,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { matToEuler, addLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

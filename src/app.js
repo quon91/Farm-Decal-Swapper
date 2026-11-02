@@ -83,7 +83,8 @@ function initSettings() {
 function setView(v) {
   if (v === 'mod' && !S.mod) v = 'mods';
   S.view = v;
-  for (const id of ['mods', 'mod', 'library', 'settings']) $('view-' + id).hidden = id !== v;
+  for (const id of ['mods', 'mod', 'library', 'maker', 'settings']) $('view-' + id).hidden = id !== v;
+  if (v === 'maker') initMaker();
   document.querySelectorAll('.nav').forEach(b => { if (b.dataset.view === v) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   window.scrollTo(0, 0);
   if (v === 'mods' && S.mods && S.mods.length) renderModGrid(); // badges follow the open mod and settings
@@ -207,7 +208,7 @@ async function loadMod(zip, name, path, kind) {
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
   if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null; weldCache = new Map(); partCache = new Map();
-  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), shopLogos: new Map() };
+  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), shopLogos: new Map() };
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);
@@ -851,12 +852,42 @@ function defaultWidth() { // about a fourteenth of the model's size: ~0.6 m on a
 function moveTo(st, hit) { Object.assign(st, { point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, face: hit.face, parentM: S.viewer.worldMatrixOf(hit.nodeId) }); }
 let dragTimer = 0;
 function dragSticker(id, hit) {
+  const pl = S.mod.plates.find(x => x.id === id); if (pl) { S.mod.place.sel = id; moveTo(pl, hit); drawStickers(); return; }
   const st = S.mod.stickers.find(x => x.id === id); if (!st) return;
   if (S.mod.place.sel !== id) S.mod.place.sel = id;
   moveTo(st, hit); drawStickers();
   clearTimeout(dragTimer); dragTimer = setTimeout(() => { updateTwin(st); drawStickers(); }, 60); // the far-side copy follows once the drag settles
 }
+/* ---- licence plates: a mount the game puts its own plate on ---- */
+const PLATE_SIZE = { SQUARISH: [0.305, 0.152], ELONGATED: [0.52, 0.11] };
+let placeMode = 'logo';
+document.querySelectorAll('#placeMode button').forEach(b => b.onclick = () => { placeMode = b.dataset.m; document.querySelectorAll('#placeMode button').forEach(x => x.setAttribute('aria-pressed', x === b)); $('fPlaceLogo').hidden = placeMode !== 'logo'; $('plateHint').hidden = placeMode !== 'plate'; });
+const plateCanvases = {};
+function plateCanvas(type) { // what the 3D view shows where the game's plate will go
+  if (plateCanvases[type]) return plateCanvases[type];
+  const [w, h] = PLATE_SIZE[type], c = document.createElement('canvas'); c.width = 512; c.height = Math.round(512 * h / w); const g = c.getContext('2d'), r = 26;
+  g.fillStyle = '#f4f6f8'; g.strokeStyle = '#1d2b3a'; g.lineWidth = 12; g.beginPath(); g.roundRect(6, 6, c.width - 12, c.height - 12, r); g.fill(); g.stroke();
+  g.fillStyle = '#1d2b3a'; g.font = `700 ${Math.round(c.height * 0.48)}px "Public Sans", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText((store.get('copyTag') || 'ABC') + ' 123', c.width / 2, c.height * 0.55);
+  return (plateCanvases[type] = c);
+}
+const selectedPlate = () => S.mod && S.mod.place && S.mod.plates.find(x => x.id === S.mod.place.sel) || null;
+function placePlate(hit) {
+  const M = S.mod, n = hit.normal, pos = Math.abs(n[2]) > 0.5 ? (n[2] > 0 ? 'FRONT' : 'BACK') : (hit.point[2] > (S.viewer.modelCenter || [0, 0, 0])[2] ? 'FRONT' : 'BACK'); // facing first, else which half of the vehicle (vehicles face +Z)
+  const pl = { id: 'pl' + Date.now().toString(36), kind: 'plate', i3d: M.place.i3d, point: hit.point, normal: n, nodeId: hit.nodeId, name: hit.name, face: hit.face, parentM: S.viewer.worldMatrixOf(hit.nodeId), rot: 0, pos, type: 'SQUARISH' };
+  M.plates.push(pl); M.place.sel = pl.id; drawStickers(); updateChanges();
+  toast(`Licence plate mount added on “${hit.name || 'part'}” (${pos === 'FRONT' ? 'front' : 'back'}). Drag it to move it.`);
+}
+$('plDelete').onclick = () => { const M = S.mod, p = selectedPlate(); if (!p) return; M.plates = M.plates.filter(x => x !== p); M.place.sel = null; drawStickers(); updateChanges(); };
+$('plPos').addEventListener('change', e => { const p = selectedPlate(); if (p) { p.pos = e.target.value; drawStickers(); } });
+$('plType').addEventListener('change', e => { const p = selectedPlate(); if (p) { p.type = e.target.value; drawStickers(); } });
+$('plRot').addEventListener('input', e => { const p = selectedPlate(); if (p) { p.rot = +e.target.value; drawStickers(); } });
+function plateWorld(p) { // world matrix of the plate mount: +Z out of the surface, +Y up
+  const f = frameOf(p.normal, p.rot), m = new THREE.Matrix4().makeBasis(new THREE.Vector3(...f.r), new THREE.Vector3(...f.u), new THREE.Vector3(...f.n));
+  m.setPosition(new THREE.Vector3(...V.add(p.point, V.mul(f.n, 0.003)))); return m;
+}
 function placeAt(hit) {
+  if (placeMode === 'plate') return placePlate(hit);
   if (!S.lib.length) { toast('Add a logo to your Logo library first.'); return; }
   const M = S.mod, logo = $('placeLogo').value;
   const st = { id: 'st' + Date.now().toString(36), i3d: M.place.i3d, logo, point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, face: hit.face, parentM: S.viewer.worldMatrixOf(hit.nodeId), width: defaultWidth(), rot: 0, mirror: false, twin: null, twinNote: '' };
@@ -909,7 +940,11 @@ function drawStickers() {
     list.push({ id: st.id, ...stickerGeom(st.i3d, st.point, st.normal, st.rot, st.width, asp, st.nodeId, st.face, st.wrap !== false), logo: l.canvas, selected: st.id === M.place.sel });
     if (st.twin) list.push({ id: st.id, ...stickerGeom(st.i3d, st.twin.point, st.twin.normal, -st.rot, st.width, asp, st.twin.nodeId, st.twin.face, st.wrap !== false), logo: l.canvas, selected: st.id === M.place.sel });
   }
+  for (const p of M.plates.filter(x => x.i3d === M.place.i3d)) { const [w, h] = PLATE_SIZE[p.type]; list.push({ id: p.id, corners: cornersOf(p.point, p.rot, w, w / h, p.normal), logo: plateCanvas(p.type), selected: p.id === M.place.sel }); }
   S.viewer.setStickers(list);
+  const pl = selectedPlate(); $('plateEdit').hidden = !pl;
+  if (pl) { $('plPos').value = pl.pos; $('plType').value = pl.type; $('plRot').value = pl.rot; $('plRotV').textContent = pl.rot + '°';
+    const vs = vehiclesUsing(pl.i3d); $('plInfo').textContent = `On “${pl.name || 'part'}”. ` + (vs.length ? `Added to ${vs.map(v => v.name).join(', ')}. Type the plate text in the shop.` : 'This model isn’t a vehicle, so the game won’t show a plate here.'); }
   // side panel
   const st = selected(), ed = $('stickerEdit'); ed.hidden = !st;
   if (st) {
@@ -919,7 +954,13 @@ function drawStickers() {
   }
   drawShopLogo();
   const box = $('stickerList'); box.innerHTML = '';
-  if (!here.length) { box.innerHTML = '<div class="empty">No stickers yet. Pick a logo above, then click the model where it should go.</div>'; return; }
+  for (const p of M.plates.filter(x => x.i3d === M.place.i3d)) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'stick'; b.setAttribute('aria-pressed', p.id === M.place.sel);
+    b.innerHTML = '<img alt=""><div style="min-width:0"><div class="t">Licence plate</div><div class="m"></div></div>'; b.querySelector('img').src = plateCanvas(p.type).toDataURL();
+    b.querySelector('.m').textContent = `${p.pos === 'FRONT' ? 'Front' : 'Back'} · ${p.type === 'ELONGATED' ? 'wide' : 'square'} · on ${p.name || 'part'}`;
+    b.onclick = () => { M.place.sel = p.id; drawStickers(); S.viewer.focus(p.point); }; box.appendChild(b);
+  }
+  if (!here.length && !M.plates.some(x => x.i3d === M.place.i3d)) { box.innerHTML = '<div class="empty">No stickers yet. Pick a logo above, then click the model where it should go.</div>'; return; }
   for (const x of here) {
     const l = logoById(x.logo), b = document.createElement('button'); b.type = 'button'; b.className = 'stick'; b.setAttribute('aria-pressed', x.id === M.place.sel);
     b.innerHTML = '<img alt=""><div style="min-width:0"><div class="t"></div><div class="m"></div></div>';
@@ -1016,7 +1057,11 @@ async function buildStickers(i3d, list) {
   const matFor = new Map();
   const shopSt = S.mod.shopLogos.get(i3d), shop = shopSt && shopSt.on && shopSt.logos.length && vehiclesUsing(i3d).some(v => v.slot) ? shopSt : null;
   const logoSet = shop ? [...new Set(shop.logos)] : [...new Set(list.map(st => st.logo))];
-  const paths = shop ? Core.nodePaths(doc) : null, byLogo = new Map(), added = new Map();
+  const plates = S.mod.plates.filter(p => p.i3d === i3d && vehiclesUsing(i3d).length);
+  const paths = shop || plates.length ? Core.nodePaths(doc) : null, byLogo = new Map(), added = new Map(), plateOut = [];
+  const nextPath = nodeId => { // index path of the next child appended under this part
+    const parent = Core.findAll(root, e => e.tag === 'Shape' && e.attrs.nodeId === nodeId)[0], n = added.get(nodeId) || 0; added.set(nodeId, n + 1);
+    if (!paths) return null; const pp = paths.get(nodeId), i = Core.sceneChildCount(parent) + n; return pp.endsWith('>') ? pp + i : pp + '|' + i; };
   for (const id of logoSet) {
     const l = logoById(id), W = hdOn() ? 2048 : 1024; let H = 1; while (H * 2 <= W / (l.canvas.width / l.canvas.height) * 1.4) H *= 2; H = Math.max(64, H);
     const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(l.canvas, 0, 0, W, H); // the sticker's shape restores the proportions
@@ -1040,14 +1085,22 @@ async function buildStickers(i3d, list) {
     entities.push(version => Core.buildShapeEntity({ name, shapeId: id, verts, tris: geo.tris, uvs: geo.uvs, normals, version }));
     if (!children.has(nodeId)) children.set(nodeId, []);
     children.get(nodeId).push(`<Shape name="${name}" shapeId="${id}"${visible ? '' : ' visibility="false"'} castsShadows="false" receiveShadows="true" decalLayer="1" clipDistance="150" nodeId="${++maxNode}" materialIds="${matFor.get(logo)}"/>`);
-    if (shop) { // index path: the parent's path plus this child's position after the parent's existing children
-      const parent = Core.findAll(root, e => e.tag === 'Shape' && e.attrs.nodeId === nodeId)[0], n = (added.get(nodeId) || 0); added.set(nodeId, n + 1);
-      const pp = paths.get(nodeId), path = pp.endsWith('>') ? pp + (Core.sceneChildCount(parent) + n) : pp + '|' + (Core.sceneChildCount(parent) + n);
-      if (!byLogo.has(logo)) byLogo.set(logo, []); byLogo.get(logo).push({ id: name, path });
-    }
+    const path = nextPath(nodeId);
+    if (shop) { if (!byLogo.has(logo)) byLogo.set(logo, []); byLogo.get(logo).push({ id: name, path }); }
   };
   const one = (st, logo, vis) => { addOne(st, st.point, st.normal, st.rot, st.nodeId, st.parentM, st.face, logo, vis); if (st.twin) addOne(st, st.twin.point, st.twin.normal, -st.rot, st.twin.nodeId, st.twin.parentM, st.twin.face, logo, vis); };
   for (const st of list) { if (shop) for (const L of logoSet) one(st, L, shop.def === L); else one(st, st.logo, true); }
+  let pk = 0;
+  for (const p of plates) { // an empty mount under the clicked part, in that part's own space
+    const local = new THREE.Matrix4().fromArray(p.parentM).invert().multiply(plateWorld(p)), tr = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    local.decompose(tr, q, sc); const R = new THREE.Matrix4().makeRotationFromQuaternion(q).toArray(), e = Core.matToEuler(R), n6 = v => +v.toFixed(6);
+    // if the part is scaled, the mount gets the opposite scale so the plate keeps its real size
+    const sAttr = [sc.x, sc.y, sc.z].some(v => Math.abs(v - 1) > 1e-4) ? ` scale="${n6(sc.x)} ${n6(sc.y)} ${n6(sc.z)}"` : '';
+    const name = `fds_plate_${++pk}`;
+    if (!children.has(p.nodeId)) children.set(p.nodeId, []);
+    children.get(p.nodeId).push(`<TransformGroup name="${name}" translation="${n6(tr.x)} ${n6(tr.y)} ${n6(tr.z)}" rotation="${n6(e[0])} ${n6(e[1])} ${n6(e[2])}"${sAttr} nodeId="${++maxNode}"/>`);
+    plateOut.push({ id: name, path: nextPath(p.nodeId), position: p.pos, type: p.type });
+  }
   for (const [nodeId, kidsXml] of children) {
     const el = Core.findAll(root, e => e.tag === 'Shape' && e.attrs.nodeId === nodeId)[0]; if (!el) throw new Error('part ' + nodeId + ' not found');
     const ind = indentAt(el.start);
@@ -1055,8 +1108,8 @@ async function buildStickers(i3d, list) {
     else { const slash = text.lastIndexOf('/>', el.end); ops.push({ at: slash, del: 2, text: '>' + nl + kidsXml.map(x => ind + '  ' + x + nl).join('') + ind + '</Shape>' }); }
   }
   for (const op of ops.sort((a, b) => b.at - a.at)) text = text.slice(0, op.at) + op.text + text.slice(op.at + op.del);
-  files.push({ rel: shapesPath, data: Core.appendShapeEntities(M.files.get(shapesPath), entities) });
-  return { files, i3dText: text, shop: shop ? { st: shop, byLogo } : null };
+  if (entities.length) files.push({ rel: shapesPath, data: Core.appendShapeEntities(M.files.get(shapesPath), entities) });
+  return { files, i3dText: text, shop: shop ? { st: shop, byLogo } : null, plates: plateOut };
 }
 
 /* ================= changes + saving ================= */
@@ -1066,16 +1119,16 @@ function plan() {
   const grp = S.mod.analysis.groups.filter(g => { const st = S.mod.groups.get(groupKey(g)); return st && st.on && st.logos.length; });
   const txt = [...S.mod.textEdits.entries()];
   const stk = S.mod.stickers.filter(st => logoById(st.logo));
-  const ren = renamePlan();
-  return { tex, grp, txt, stk, ren };
+  const ren = renamePlan(), pla = S.mod.plates.filter(p => vehiclesUsing(p.i3d).length);
+  return { tex, grp, txt, stk, ren, pla };
 }
 function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += e.store ? 1 : 0; for (const m of e.sets.values()) n += m.size; } return n; }
-function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren); }
+function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren) + p.pla.length; }
 function updateChanges() {
-  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames;
+  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames + p.pla.length;
   const nSt = p.stk.reduce((a, st) => a + 1 + (st.twin ? 1 : 0), 0);
   $('cntStickers').textContent = nSt || '';
-  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> name${nNames === 1 ? '' : 's'}`);
+  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> name${nNames === 1 ? '' : 's'}`); if (p.pla.length) parts.push(`<b>${p.pla.length}</b> plate${p.pla.length === 1 ? '' : 's'}`);
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
 }
@@ -1132,11 +1185,16 @@ async function saveMod() {
     }
     // stickers: new geometry + material + texture per model file
     const byI3d = new Map(); for (const st of plan().stk) { if (!byI3d.has(st.i3d)) byI3d.set(st.i3d, []); byI3d.get(st.i3d).push(st); }
+    for (const p of plan().pla) if (!byI3d.has(p.i3d)) byI3d.set(p.i3d, []);
     for (const [i3d, list] of byI3d) {
       if (textOut.has(i3d)) { say(`Skipped stickers on ${i3d}: you edited that file by hand. Revert it in Files to add stickers.`); await new Promise(r => setTimeout(r, 1500)); continue; }
-      say(`Adding ${list.length} sticker${list.length === 1 ? '' : 's'} to ${baseName(i3d)}…`); await tick();
+      say(`Adding ${list.length ? list.length + ' sticker' + (list.length === 1 ? '' : 's') : 'licence plates'} to ${baseName(i3d)}…`); await tick();
       const res = await buildStickers(i3d, list);
       changed.push(...res.files); textOut.set(i3d, res.i3dText);
+      if (res.plates.length) for (const v of vehiclesUsing(i3d)) {
+        const tag = Core.slug(baseName(v.xml).replace(/\.xml$/i, '')).toLowerCase();
+        textOut.set(v.xml, Core.addLicensePlates(textOut.get(v.xml) || xmlText(v.xml), res.plates.map(p => ({ id: `${p.id}_${tag}`, path: p.path, position: p.position, type: p.type }))));
+      }
       if (res.shop) for (const v of vehiclesUsing(i3d)) {
         if (!v.slot) continue; const sh = res.shop.st, tag = Core.slug(baseName(v.xml).replace(/\.xml$/i, '')).toLowerCase();
         const maps = [], options = [];
@@ -1190,6 +1248,115 @@ async function saveMod() {
   finally { updateChanges(); }
 }
 
+/* ================= logo maker ================= */
+const LM = { ready: false, mono: '', timer: 0, custom: null };
+const farmName = () => ((window.FDS_DEFAULTS || {}).farmName || 'MY FARM');
+const LM_PRESETS = {
+  farm: { template: 'seal', pic: 'cottonField', l2: 'FARMS', l3: '', palette: 'delta', font: 'western' },
+  construction: { template: 'seal', pic: 'excavator', l2: 'CONSTRUCTION', l3: '', palette: 'construction', font: 'slab' },
+  landscaping: { template: 'seal', pic: 'oak', l2: 'LANDSCAPING', l3: '', palette: 'landscaping', font: 'slab' },
+  livestock: { template: 'shield', pic: 'bull', l2: 'LIVESTOCK', l3: 'CATTLE CO.', palette: 'livestock', font: 'western' },
+  hauling: { template: 'horizontal', pic: 'semi', l2: 'HAULING', l3: 'LOCAL & LONG HAUL', palette: 'hauling', font: 'bold' },
+  timber: { template: 'seal', pic: 'pine', l2: 'TIMBER', l3: '', palette: 'timber', font: 'western' },
+  grain: { template: 'shield', pic: 'binsScene', l2: 'GRAIN', l3: '', palette: 'grain', font: 'western' },
+  plate: { template: 'plate', pic: 'none', l1: 'FARM 01', l2: '', l3: '', palette: 'delta', font: 'bold', plate: true },
+};
+function initMaker() {
+  if (LM.ready) { lmDraw(); return; } LM.ready = true;
+  const L = window.LogoMaker, add = (sel, k, label) => sel.add(new Option(label, k));
+  for (const [k, t] of Object.entries(L.TEMPLATES)) add($('lmTemplate'), k, t.label);
+  const groups = {}; for (const [k, p] of Object.entries(L.PICS)) (groups[p.group] = groups[p.group] || []).push([k, p]);
+  for (const [g, list] of Object.entries(groups)) { const og = document.createElement('optgroup'); og.label = g; for (const [k, p] of list) og.appendChild(new Option(p.label + (p.kind === 'scene' ? ' (scene)' : ''), k)); $('lmPic').appendChild(og); }
+  for (const [k, ft] of Object.entries(L.FONTS)) add($('lmFont'), k, ft.label);
+  for (const [k, p] of Object.entries(L.PALETTES)) add($('lmPal'), k, p.label); add($('lmPal'), 'custom', 'Your own colours');
+  let saved = null; try { saved = JSON.parse(store.get('lmState') || 'null'); } catch (e) {}
+  lmApply(saved || Object.assign({}, LM_PRESETS.farm, { l1: farmName(), l3: (window.FDS_DEFAULTS || {}).est || '' }));
+  for (const id of ['lmTemplate', 'lmPic', 'lmFont']) $(id).addEventListener('change', lmChanged);
+  for (const id of ['lmL1', 'lmL2', 'lmL3']) $(id).addEventListener('input', lmChanged);
+  $('lmPal').addEventListener('change', () => { if ($('lmPal').value !== 'custom') lmSwatches(L.PALETTES[$('lmPal').value]); lmChanged(); });
+  for (const id of ['lmBg', 'lmMetal', 'lmInk', 'lmText']) $(id).addEventListener('input', () => { $('lmPal').value = 'custom'; lmChanged(); });
+  document.querySelectorAll('#lmMono button').forEach(b => b.onclick = () => { LM.mono = b.dataset.m; document.querySelectorAll('#lmMono button').forEach(x => x.setAttribute('aria-pressed', x === b)); lmChanged(); });
+  document.querySelectorAll('#lmPresets button').forEach(b => b.onclick = () => {
+    const p = LM_PRESETS[b.dataset.p], fn = farmName(), initials = (store.get('copyTag') || (window.FDS_DEFAULTS || {}).copyTag || fn.split(/\s+/).filter(Boolean).map(w => w[0]).join('')).slice(0, 4).toUpperCase();
+    const est = (window.FDS_DEFAULTS || {}).est || '';
+    lmApply(Object.assign({ mono: '' }, p, p.plate ? { l1: initials + ' 01', l2: fn, l3: est } : { l1: fn }, b.dataset.p === 'farm' ? { l3: est } : {})); });
+  $('lmAdd').onclick = lmAdd; $('lmPng').onclick = lmPng;
+  // real pictures: a photo or screenshot, or a render of the open mod's model
+  $('lmPhotoBtn').onclick = () => $('lmPhotoIn').click();
+  $('lmPhotoIn').addEventListener('change', async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    try { const c = await blobToCanvas(f); lmSetPhoto(c, f.name, !edgeIsClear(c)); } catch (err) { toast('That picture couldn’t be opened.'); } });
+  $('lmShot').onclick = () => {
+    if (!S.viewer || !S.mod || !loadedModel) { toast('Open a mod and its Place logos tab first, turn the model to the angle you want, then come back here.'); return; }
+    const sel = S.mod.place && S.mod.place.sel; if (sel) { S.mod.place.sel = null; drawStickers(); }
+    const shot = S.viewer.snapshotAt(2048, 1536); if (sel) { S.mod.place.sel = sel; drawStickers(); }
+    lmSetPhoto(trimCanvas(shot), (S.mod.title || S.mod.name) + ' (3D view)', false);
+  };
+  $('lmPhotoClear').onclick = () => { LM.photo = null; LM.photoSrc = null; lmPhotoUI(); lmChanged(); };
+  $('lmPhotoMode').addEventListener('change', lmChanged);
+  $('lmPhotoBg').addEventListener('change', lmPhotoProcess); $('lmPhotoTol').addEventListener('input', () => { clearTimeout(LM.ptimer); LM.ptimer = setTimeout(lmPhotoProcess, 120); });
+  lmPhotoUI();
+}
+function lmSetPhoto(canvas, name, plainBg) {
+  const k = Math.min(1, 1600 / Math.max(canvas.width, canvas.height)), c = document.createElement('canvas'); // keep it a sensible size
+  c.width = Math.round(canvas.width * k); c.height = Math.round(canvas.height * k); const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(canvas, 0, 0, c.width, c.height);
+  LM.photoSrc = c; LM.photoName = name; $('lmPhotoBg').checked = plainBg; $('lmPhotoMode').value = plainBg || edgeIsClear(c) ? 'cutout' : 'fill';
+  lmPhotoProcess();
+}
+function lmPhotoProcess() {
+  if (!LM.photoSrc) return; let c = LM.photoSrc;
+  if ($('lmPhotoBg').checked) { const src = document.createElement('canvas'); src.width = c.width; src.height = c.height; src.getContext('2d').drawImage(c, 0, 0); c = trimCanvas(removeBackground(src, edgeColor(src), +$('lmPhotoTol').value, 14, false)); }
+  LM.photo = c; LM.photoUrl = c.toDataURL('image/png'); lmPhotoUI(); LM.nameEdited = false; lmChanged();
+}
+function lmPhotoUI() {
+  const on = !!LM.photo; $('lmPhotoOpts').hidden = !on; $('lmPhotoClear').hidden = !on; $('lmPic').disabled = on;
+  $('fPhotoTol').hidden = !$('lmPhotoBg').checked; $('lmPhotoTolV').textContent = $('lmPhotoTol').value;
+  $('lmPhotoInfo').textContent = on ? `Using “${LM.photoName}”. Only use pictures you own or have permission to use.` : 'Use your own photos or in-game screenshots for real equipment, animals and buildings.';
+}
+function lmSwatches(p) { $('lmBg').value = p.bg; $('lmMetal').value = p.metal; $('lmInk').value = p.ink; $('lmText').value = p.text; }
+function lmApply(st) {
+  const L = window.LogoMaker;
+  $('lmTemplate').value = st.template || 'seal'; $('lmPic').value = st.pic || 'none'; $('lmFont').value = st.font || 'western';
+  $('lmL1').value = st.l1 || ''; $('lmL2').value = st.l2 || ''; $('lmL3').value = st.l3 || '';
+  $('lmPal').value = st.palette || 'delta'; lmSwatches(st.colors || L.PALETTES[st.palette] || L.PALETTES.delta);
+  LM.mono = st.mono || ''; document.querySelectorAll('#lmMono button').forEach(x => x.setAttribute('aria-pressed', x.dataset.m === LM.mono));
+  lmChanged();
+}
+function lmOpts(withFonts) {
+  const L = window.LogoMaker, pal = $('lmPal').value, base = L.PALETTES[pal] || L.PALETTES.delta;
+  const o = { template: $('lmTemplate').value, pic: $('lmPic').value, l1: $('lmL1').value.trim(), l2: $('lmL2').value.trim(), l3: $('lmL3').value.trim(), font: $('lmFont').value,
+    palette: pal === 'custom' ? 'delta' : pal, colors: pal === 'custom' ? { bg: $('lmBg').value, metal: $('lmMetal').value, ink: $('lmInk').value, text: $('lmText').value, soft: '#f4f1e8', accent: $('lmMetal').value } : null, mono: LM.mono || null };
+  if (withFonts) o.fonts = window.LM_FONTS;
+  if (LM.photo) { o.photo = LM.photoUrl; o.photoMode = $('lmPhotoMode').value; }
+  return o;
+}
+function lmDefaultName() { const o = lmOpts(); return [o.l1, o.l2].filter(Boolean).join(' ') + ' - ' + window.LogoMaker.TEMPLATES[o.template].label.replace(/ \(.*\)/, '') + (o.mono ? (o.mono === '#ffffff' ? ' (white)' : ' (black)') : ''); }
+function lmChanged() {
+  const o = lmOpts(); try { store.set('lmState', JSON.stringify(Object.assign({}, o, { palette: $('lmPal').value }))); } catch (e) {}
+  if (!LM.nameEdited) $('lmName').value = lmDefaultName();
+  clearTimeout(LM.timer); LM.timer = setTimeout(lmDraw, 60);
+}
+$('lmName').addEventListener('input', () => { LM.nameEdited = !!$('lmName').value.trim(); });
+async function lmRender(scale) {
+  const L = window.LogoMaker, o = lmOpts(true), [w, h] = L.size(o.template), svg = L.svg(o);
+  const img = new Image(), url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  try { img.src = url; await img.decode(); } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+  const c = document.createElement('canvas'); c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+  const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, c.width, c.height); return c;
+}
+async function lmDraw() {
+  if (!window.LogoMaker) return; const c = await lmRender(0.5), v = $('lmCanvas');
+  v.width = c.width; v.height = c.height; v.getContext('2d').drawImage(c, 0, 0);
+}
+async function lmAdd() {
+  const c = await lmRender(1), blob = await canvasBlob(c), name = $('lmName').value.trim() || lmDefaultName();
+  const rec = await addLogo(blob, name, { cleaned: true }); rec.needsBg = false; await saveRec(rec);
+  renderLib(); refreshLogos(); LM.nameEdited = false; lmChanged(); toast(`“${name}” added to your library.`);
+}
+async function lmPng() {
+  const c = await lmRender(1), blob = await canvasBlob(c), name = Core.slug($('lmName').value.trim() || lmDefaultName()) + '.png';
+  try { const r = await offerFile(name, blob, 'png'); if (r === 'saved') toast('Logo saved.'); } catch (e) { toast('Couldn’t save: ' + e.message); }
+}
+
 /* ================= boot ================= */
 (async () => {
   initSettings();
@@ -1197,6 +1364,12 @@ async function saveMod() {
   if (saved && saved.length) {
     saved.sort((a, b) => a.order - b.order);
     for (const r of saved) { try { const rec = await addLogo(r.image, r.name, { id: r.id, cleaned: r.cleaned }); rec.original = r.original || r.image; rec.order = r.order; if (r.cleaned) rec.needsBg = false; } catch (e) {} }
+  }
+  // logos an update withdrew (replaced designs): remove them once
+  if (window.FDS_SEED_REMOVE && window.FDS_SEED_REMOVE.length) {
+    let gone = []; try { gone = JSON.parse(store.get('seedRemoved') || '[]'); } catch (e) {}
+    for (const id of window.FDS_SEED_REMOVE) { if (gone.includes(id)) continue; const i = S.lib.findIndex(l => l.id === id); if (i >= 0) { S.lib.splice(i, 1); await dbDel(id); } gone.push(id); }
+    store.set('seedRemoved', JSON.stringify(gone));
   }
   // preloaded logos: add any this copy hasn't added before (an update can bring new ones; deleted ones stay deleted)
   if (window.FDS_SEED && window.FDS_SEED.length) {

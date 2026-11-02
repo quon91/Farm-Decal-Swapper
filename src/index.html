@@ -21,6 +21,7 @@
       <button type="button" class="nav" data-view="mods" aria-current="page"><span class="ico ico-mods"></span>Mods</button>
       <button type="button" class="nav" data-view="mod" id="navMod" hidden><span class="ico ico-open"></span><span class="nav-mod-name" id="navModName">Open mod</span><span class="badge" id="navChanges" hidden></span></button>
       <button type="button" class="nav" data-view="library"><span class="ico ico-lib"></span>Logo library<span class="badge soft" id="navLibCount"></span></button>
+      <button type="button" class="nav" data-view="maker"><span class="ico ico-make"></span>Logo maker</button>
       <button type="button" class="nav" data-view="settings"><span class="ico ico-set"></span>Settings</button>
     </div>
     <div class="side-foot" id="sideFoot">Everything runs on your computer. Your mods are never uploaded.</div>
@@ -91,7 +92,16 @@
           </div>
           <div class="placeside">
             <div class="field" id="fPlaceModel"><label for="placeModel">Model</label><select id="placeModel"></select></div>
-            <div class="field"><label for="placeLogo">Logo</label><select id="placeLogo"></select></div>
+            <div class="field"><span class="lab">Click the model to place</span><div class="seg" id="placeMode" role="group" aria-label="What to place"><button type="button" data-m="logo" aria-pressed="true">Logo</button><button type="button" data-m="plate" aria-pressed="false">Licence plate</button></div></div>
+            <div class="field" id="fPlaceLogo"><label for="placeLogo">Logo</label><select id="placeLogo"></select></div>
+            <p class="muted hint" id="plateHint" hidden>Click the back (or front) of the vehicle where the plate should go. The game draws a real plate there, and you type its text when you buy or configure the vehicle.</p>
+            <div class="stickedit" id="plateEdit" hidden>
+              <div class="row-between"><h3>Licence plate</h3><button type="button" class="btn small danger" id="plDelete">Delete</button></div>
+              <div class="field"><label for="plPos">Which end</label><select id="plPos"><option value="BACK">Back</option><option value="FRONT">Front</option></select></div>
+              <div class="field"><label for="plType">Plate shape</label><select id="plType"><option value="SQUARISH">Square (US style)</option><option value="ELONGATED">Wide (European style)</option></select></div>
+              <div class="field"><label for="plRot">Tilt <span class="mono" id="plRotV"></span></label><input type="range" id="plRot" min="-45" max="45" step="1"></div>
+              <p class="muted hint" id="plInfo"></p>
+            </div>
             <div class="stickedit" id="stickerEdit" hidden>
               <div class="row-between"><h3>Selected sticker</h3><button type="button" class="btn small danger" id="stDelete">Delete</button></div>
               <div class="field"><label for="stWidth">Width <span class="mono" id="stWidthV"></span></label><input type="range" id="stWidth" min="0.05" max="6" step="0.01"></div>
@@ -150,6 +160,41 @@
       </header>
       <div class="libgrid" id="lib"></div>
       <p class="muted tip">Tip: inside a mod, open any texture, mark a logo with your mouse and choose <b>Add area to library</b>. For JPGs or logos on a solid colour, use <b>Remove background</b>.</p>
+    </section>
+
+    <!-- ======= LOGO MAKER ======= -->
+    <section class="view" id="view-maker" hidden>
+      <header class="vhead"><div><h1>Logo maker</h1><p class="muted">Make a logo from a layout, a picture, your words and colours, then add it to your library at 2048 px.</p></div></header>
+      <div class="segs makerpresets" id="lmPresets" role="group" aria-label="Start from">
+        <button type="button" data-p="farm">Farm</button><button type="button" data-p="construction">Construction</button><button type="button" data-p="landscaping">Landscaping</button><button type="button" data-p="livestock">Livestock</button><button type="button" data-p="hauling">Hauling</button><button type="button" data-p="timber">Timber</button><button type="button" data-p="grain">Grain</button><button type="button" data-p="plate">Licence plate</button>
+      </div>
+      <div class="maker">
+        <div class="makerview checker"><canvas id="lmCanvas" aria-label="Logo preview"></canvas></div>
+        <div class="makerside">
+          <div class="field"><label for="lmTemplate">Layout</label><select id="lmTemplate"></select></div>
+          <div class="field"><label for="lmPic">Picture</label><select id="lmPic"></select></div>
+          <div class="field photofield"><span class="lab">Or use a real picture</span>
+            <div class="row-wrap"><button type="button" class="btn small" id="lmPhotoBtn">Photo or screenshot…</button><button type="button" class="btn small" id="lmShot">From a mod's 3D view</button><button type="button" class="btn small" id="lmPhotoClear" hidden>Use drawn picture</button></div>
+            <input type="file" id="lmPhotoIn" accept="image/png,image/jpeg,image/webp" hidden>
+            <div id="lmPhotoOpts" hidden>
+              <select id="lmPhotoMode" aria-label="How the picture sits"><option value="cutout">Cut out (no background)</option><option value="fill">Fill the frame (keep background)</option></select>
+              <label class="check"><input type="checkbox" id="lmPhotoBg"> <span>Remove a plain background</span></label>
+              <div class="field" id="fPhotoTol"><label for="lmPhotoTol">How much to remove <span class="mono" id="lmPhotoTolV"></span></label><input type="range" id="lmPhotoTol" min="4" max="120" value="40"></div>
+            </div>
+            <p class="muted hint" id="lmPhotoInfo"></p>
+          </div>
+          <div class="field"><label for="lmL1">Main name</label><input type="text" id="lmL1" maxlength="28"></div>
+          <div class="field"><label for="lmL2">Second line</label><input type="text" id="lmL2" maxlength="28"></div>
+          <div class="field"><label for="lmL3">Small line <span class="muted">(optional)</span></label><input type="text" id="lmL3" maxlength="36"></div>
+          <div class="field"><label for="lmFont">Lettering</label><select id="lmFont"></select></div>
+          <div class="field"><label for="lmPal">Colours</label><select id="lmPal"></select>
+            <div class="swatches"><label>Background <input type="color" id="lmBg"></label><label>Trim <input type="color" id="lmMetal"></label><label>Outline <input type="color" id="lmInk"></label><label>Text <input type="color" id="lmText"></label></div></div>
+          <div class="field"><span class="lab">Version</span><div class="seg" id="lmMono" role="group" aria-label="Version"><button type="button" data-m="" aria-pressed="true">Full colour</button><button type="button" data-m="#ffffff">White</button><button type="button" data-m="#000000">Black</button></div></div>
+          <div class="field"><label for="lmName">Name in your library</label><input type="text" id="lmName"></div>
+          <div class="edacts"><button type="button" class="btn primary" id="lmAdd">Add to library</button><button type="button" class="btn" id="lmPng">Save PNG</button></div>
+          <p class="muted hint">Tip: make a White and a Black version too, for dark and light paint.</p>
+        </div>
+      </div>
     </section>
 
     <!-- ======= SETTINGS ======= -->
@@ -315,6 +360,8 @@
 <script src="core.js"></script>
 <script src="seed.js"></script>
 <script src="viewer.js"></script>
+<script src="lmfonts.js"></script>
+<script src="logomaker.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
