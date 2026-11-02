@@ -42,7 +42,7 @@ The app isn't code-signed, so Windows SmartScreen may say *Windows protected you
 
 ### Logo maker
 
-Go to **Logo maker**, click a starting point (Farm, Construction, Landscaping, Livestock, Hauling, Timber, Grain or Licence plate), then change the layout, picture, words, lettering and colours. **White** and **Black** make one-colour versions for dark and light paint. **Add to library** puts it straight into your Logo library.
+Go to **Logo maker**, click a starting point (Farm, Construction, Landscaping, Livestock, Hauling, Timber, Grain or Licence plate), then change the layout, picture, words, lettering and colours. **White** and **Black** make one-colour versions for dark and light paint. **Add to library** puts it straight into your Logo library. Logos made in the Logo maker keep their settings: in the Logo library, click **Edit in Logo maker** to change the words, lettering, colours or picture, then **Save changes** (or **Add as new** to keep both). Logo packs carry these settings too.
 
 ### Good to know
 

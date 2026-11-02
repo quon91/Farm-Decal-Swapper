@@ -245,7 +245,7 @@ async function addLogo(blob, name, opts = {}) {
   const rec = { id: opts.id || newId(), name: name || 'Logo', canvas: opts.canvas || trimCanvas(raw), original: blob, order: S.lib.length, cleaned: !!opts.cleaned, needsBg: !edgeIsClear(raw) && !opts.cleaned };
   S.lib.push(rec); return rec;
 }
-async function saveRec(rec) { const image = await canvasBlob(rec.canvas); await dbPut({ id: rec.id, name: rec.name, order: rec.order, image, original: rec.original, cleaned: rec.cleaned }); }
+async function saveRec(rec) { const image = await canvasBlob(rec.canvas); await dbPut({ id: rec.id, name: rec.name, order: rec.order, image, original: rec.original, cleaned: rec.cleaned, recipe: rec.recipe || null }); }
 async function addLogoFiles(files) {
   let last = null;
   for (const f of files) {
@@ -266,12 +266,13 @@ function renderLib() {
   S.lib.forEach((l, i) => {
     const el = document.createElement('div'); el.className = 'libcard';
     el.innerHTML = `<div class="pv checker"><img alt=""></div><div class="body"><input type="text" aria-label="Logo name"><span class="dim"></span>
-      <div class="acts"><button type="button" class="btn small" data-a="bg">Remove background</button><button type="button" class="btn small" data-a="up" aria-label="Move earlier">←</button><button type="button" class="btn small" data-a="down" aria-label="Move later">→</button><button type="button" class="btn small danger" data-a="del">Delete</button></div></div>`;
+      <div class="acts"><button type="button" class="btn small" data-a="edit" hidden>Edit in Logo maker</button><button type="button" class="btn small" data-a="bg">Remove background</button><button type="button" class="btn small" data-a="up" aria-label="Move earlier">←</button><button type="button" class="btn small" data-a="down" aria-label="Move later">→</button><button type="button" class="btn small danger" data-a="del">Delete</button></div></div>`;
     el.querySelector('img').src = thumbURL(l.canvas);
     const nm = el.querySelector('input'); nm.value = l.name;
     nm.addEventListener('change', () => { l.name = nm.value.trim() || 'Logo'; nm.value = l.name; saveRec(l); refreshLogos(); });
     el.querySelector('.dim').textContent = `${l.canvas.width} × ${l.canvas.height} px` + (l.needsBg && !l.cleaned ? ' · has a solid background' : '') + (l.cleaned ? ' · background removed' : '');
     el.querySelector('[data-a=bg]').onclick = () => openBg(l);
+    if (l.recipe) { const eb = el.querySelector('[data-a=edit]'); eb.hidden = false; eb.onclick = () => lmEdit(l); el.querySelector('[data-a=bg]').hidden = true; }
     const move = d => { const j = i + d; if (j < 0 || j >= S.lib.length) return; S.lib.splice(i, 1); S.lib.splice(j, 0, l); S.lib.forEach((x, k) => { x.order = k; saveRec(x); }); renderLib(); refreshLogos(); };
     el.querySelector('[data-a=up]').onclick = () => move(-1); el.querySelector('[data-a=up]').disabled = i === 0;
     el.querySelector('[data-a=down]').onclick = () => move(1); el.querySelector('[data-a=down]').disabled = i === S.lib.length - 1;
@@ -289,7 +290,7 @@ function refreshLogos() { if (S.mod) { renderOpts(); repaintCards(); updateChang
 $('btnExportPack').onclick = async () => {
   if (!S.lib.length) { toast('Your library is empty.'); return; }
   const z = new JSZip(), meta = [];
-  for (const l of S.lib) { const f = `logos/${Core.slug(l.name)}_${l.id.slice(-4)}.png`; z.file(f, await canvasBlob(l.canvas)); meta.push({ name: l.name, file: f, order: l.order }); }
+  for (const l of S.lib) { const f = `logos/${Core.slug(l.name)}_${l.id.slice(-4)}.png`; z.file(f, await canvasBlob(l.canvas)); meta.push({ name: l.name, file: f, order: l.order, recipe: l.recipe || undefined }); }
   z.file('library.json', JSON.stringify({ app: 'Farm Decal Swapper', version: 1, logos: meta }, null, 2));
   const blob = await z.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   try { const r = await offerFile('logo-library.zip', blob, 'zip'); if (r === 'saved') toast('Library exported.'); } catch (e) { toast('Couldn’t save: ' + e.message); }
@@ -302,7 +303,7 @@ $('packIn').addEventListener('change', async e => {
     if (metaF) list = JSON.parse(await metaF.async('string')).logos || [];
     else list = Object.keys(z.files).filter(n => /\.(png|webp|jpe?g)$/i.test(n)).map(n => ({ name: baseName(n).replace(/\.[^.]+$/, ''), file: n }));
     let n = 0;
-    for (const it of list) { const zf = z.file(it.file); if (!zf) continue; const blob = new Blob([await zf.async('uint8array')], { type: 'image/png' }); const rec = await addLogo(blob, it.name, { cleaned: true }); rec.needsBg = false; await saveRec(rec); n++; }
+    for (const it of list) { const zf = z.file(it.file); if (!zf) continue; const blob = new Blob([await zf.async('uint8array')], { type: 'image/png' }); const rec = await addLogo(blob, it.name, { cleaned: true }); rec.needsBg = false; rec.recipe = it.recipe || null; await saveRec(rec); n++; }
     renderLib(); refreshLogos(); toast(`${n} logo${n === 1 ? '' : 's'} imported.`);
   } catch (err) { toast('That file isn’t a logo pack: ' + err.message); }
 });
@@ -1280,7 +1281,8 @@ function initMaker() {
     const p = LM_PRESETS[b.dataset.p], fn = farmName(), initials = (store.get('copyTag') || (window.FDS_DEFAULTS || {}).copyTag || fn.split(/\s+/).filter(Boolean).map(w => w[0]).join('')).slice(0, 4).toUpperCase();
     const est = (window.FDS_DEFAULTS || {}).est || '';
     lmApply(Object.assign({ mono: '' }, p, p.plate ? { l1: initials + ' 01', l2: fn, l3: est } : { l1: fn }, b.dataset.p === 'farm' ? { l3: est } : {})); });
-  $('lmAdd').onclick = lmAdd; $('lmPng').onclick = lmPng;
+  $('lmAdd').onclick = lmAdd; $('lmPng').onclick = lmPng; $('lmSave').onclick = lmSave;
+  $('lmEditStop').onclick = () => { LM.editing = null; LM.nameEdited = false; lmEditUI(); lmChanged(); };
   // real pictures: a photo or screenshot, or a render of the open mod's model
   $('lmPhotoBtn').onclick = () => $('lmPhotoIn').click();
   $('lmPhotoIn').addEventListener('change', async e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -1330,8 +1332,14 @@ function lmOpts(withFonts) {
   return o;
 }
 function lmDefaultName() { const o = lmOpts(); return [o.l1, o.l2].filter(Boolean).join(' ') + ' - ' + window.LogoMaker.TEMPLATES[o.template].label.replace(/ \(.*\)/, '') + (o.mono ? (o.mono === '#ffffff' ? ' (white)' : ' (black)') : ''); }
+function lmRecipe() { // everything needed to open this logo in the maker again
+  const o = lmOpts(); delete o.fonts; o.palette = $('lmPal').value;
+  if ($('lmPal').value !== 'custom') delete o.colors;
+  if (LM.photo) { o.photo = LM.photoUrl; o.photoMode = $('lmPhotoMode').value; o.photoName = LM.photoName; }
+  return o;
+}
 function lmChanged() {
-  const o = lmOpts(); try { store.set('lmState', JSON.stringify(Object.assign({}, o, { palette: $('lmPal').value }))); } catch (e) {}
+  const o = lmOpts(); try { const st = Object.assign({}, o, { palette: $('lmPal').value }); delete st.photo; store.set('lmState', JSON.stringify(st)); } catch (e) {}
   if (!LM.nameEdited) $('lmName').value = lmDefaultName();
   clearTimeout(LM.timer); LM.timer = setTimeout(lmDraw, 60);
 }
@@ -1347,9 +1355,27 @@ async function lmDraw() {
   if (!window.LogoMaker) return; const c = await lmRender(0.5), v = $('lmCanvas');
   v.width = c.width; v.height = c.height; v.getContext('2d').drawImage(c, 0, 0);
 }
+async function lmEdit(l) { // open a logo's settings in the maker
+  setView('maker'); const r = l.recipe;
+  if (r.photo) { const img = new Image(); img.src = r.photo; await img.decode(); const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; c.getContext('2d').drawImage(img, 0, 0);
+    LM.photoSrc = c; LM.photo = c; LM.photoUrl = r.photo; LM.photoName = r.photoName || 'your picture'; $('lmPhotoBg').checked = false; $('lmPhotoMode').value = r.photoMode || 'cutout'; }
+  else { LM.photo = null; LM.photoSrc = null; }
+  lmPhotoUI(); lmApply(r); LM.editing = l.id; $('lmName').value = l.name; LM.nameEdited = true; lmEditUI();
+  window.scrollTo(0, 0); toast(`Editing “${l.name}”. Change anything, then Save changes, or Add as new to keep both.`);
+}
+function lmEditUI() {
+  const l = LM.editing && S.lib.find(x => x.id === LM.editing); if (!l) LM.editing = null;
+  $('lmEditBar').hidden = !l; $('lmSave').hidden = !l; $('lmAdd').textContent = l ? 'Add as new' : 'Add to library'; if (l) $('lmEditName').textContent = l.name;
+}
+async function lmSave() {
+  const l = S.lib.find(x => x.id === LM.editing); if (!l) return;
+  const c = await lmRender(1), blob = await canvasBlob(c);
+  l.canvas = trimCanvas(c); l.original = blob; l.recipe = lmRecipe(); l.name = $('lmName').value.trim() || l.name; l.cleaned = true; l.needsBg = false;
+  await saveRec(l); renderLib(); refreshLogos(); lmEditUI(); toast(`“${l.name}” updated. Mods use the new version the next time you save them.`);
+}
 async function lmAdd() {
   const c = await lmRender(1), blob = await canvasBlob(c), name = $('lmName').value.trim() || lmDefaultName();
-  const rec = await addLogo(blob, name, { cleaned: true }); rec.needsBg = false; await saveRec(rec);
+  const rec = await addLogo(blob, name, { cleaned: true }); rec.needsBg = false; rec.recipe = lmRecipe(); await saveRec(rec);
   renderLib(); refreshLogos(); LM.nameEdited = false; lmChanged(); toast(`“${name}” added to your library.`);
 }
 async function lmPng() {
@@ -1363,7 +1389,7 @@ async function lmPng() {
   const saved = await dbAll();
   if (saved && saved.length) {
     saved.sort((a, b) => a.order - b.order);
-    for (const r of saved) { try { const rec = await addLogo(r.image, r.name, { id: r.id, cleaned: r.cleaned }); rec.original = r.original || r.image; rec.order = r.order; if (r.cleaned) rec.needsBg = false; } catch (e) {} }
+    for (const r of saved) { try { const rec = await addLogo(r.image, r.name, { id: r.id, cleaned: r.cleaned }); rec.original = r.original || r.image; rec.order = r.order; rec.recipe = r.recipe || null; if (r.cleaned) rec.needsBg = false; } catch (e) {} }
   }
   // logos an update withdrew (replaced designs): remove them once
   if (window.FDS_SEED_REMOVE && window.FDS_SEED_REMOVE.length) {
@@ -1377,8 +1403,10 @@ async function lmPng() {
     if (!done.length && store.get('seeded')) done = ['seed-0', 'seed-1']; // first builds preloaded two logos
     const have = new Set(S.lib.map(l => l.id));
     for (const d of window.FDS_SEED) {
+      const mine = S.lib.find(l => l.id === d.id);
+      if (mine && d.recipe && !mine.recipe) { mine.recipe = d.recipe; await saveRec(mine); }
       if (done.includes(d.id) || have.has(d.id)) continue;
-      try { const rec = await addLogo(dataBlob(d.src), d.name, { id: d.id }); rec.needsBg = false; rec.order = S.lib.length; await saveRec(rec); } catch (e) {}
+      try { const rec = await addLogo(dataBlob(d.src), d.name, { id: d.id }); rec.needsBg = false; rec.order = S.lib.length; rec.recipe = d.recipe || null; await saveRec(rec); } catch (e) {}
       done.push(d.id);
     }
     store.set('seededIds', JSON.stringify(done)); store.set('seeded', '1');

@@ -290,3 +290,6 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .row-wrap{display:flex;flex-wrap:wrap;gap:6px}
 .photofield #lmPhotoOpts{display:flex;flex-direction:column;gap:8px;margin-top:8px}
 .photofield #lmPhotoOpts[hidden]{display:none}
+
+.editbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;margin:0 0 12px;border-radius:var(--r);background:var(--accent-soft);color:var(--ink);font-size:.9rem}
+.editbar[hidden]{display:none}
