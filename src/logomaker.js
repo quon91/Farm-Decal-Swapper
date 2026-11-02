@@ -285,7 +285,16 @@ function arcText(o, txt, pathId, d, len, size, opt = {}) {
 function star(x, y, r, fill) { let d = ''; for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.42 : r; d += (i ? 'L' : 'M') + f(x + rr * Math.cos(a)) + ' ' + f(y + rr * Math.sin(a)); } return `<path d="${d}Z" fill="${fill}"/>`; }
 
 /* the picture inside a box; scenes fill the box, objects sit on `bgFill` */
-function art(o, x, y, w, h, opts = {}) {
+function art(o, x, y, w, h, opts = {}) { // the picture, moved and sized as the user set it
+  const inner = artInner(o, x, y, w, h, opts); if (!inner) return '';
+  const s = o.picScale || 1, k = picKind(o) === 'scene' || (o.mono && picKind(o) === 'scene');
+  let dx = (o.picX || 0) * o.TW, dy = (o.picY || 0) * o.TH;
+  if (k) { const mx = Math.max(0, (s - 1) * w / 2), my = Math.max(0, (s - 1) * h / 2); dx = Math.max(-mx, Math.min(mx, dx)); dy = Math.max(-my, Math.min(my, dy)); } // backgrounds never leave a gap
+  if (!dx && !dy && s === 1) return inner;
+  const cx = x + w / 2, cy = y + h / 2;
+  return `<g transform="translate(${f(dx + cx)} ${f(dy + cy)}) scale(${+s.toFixed(3)}) translate(${f(-cx)} ${f(-cy)})">${inner}</g>`;
+}
+function artInner(o, x, y, w, h, opts = {}) {
   if (o.photo) { // the user's own photo, screenshot or 3D render
     const fill = o.photoMode === 'fill', pad = fill ? 0 : (opts.pad == null ? 0.08 : opts.pad);
     const filt = o.mono ? ` filter="url(#${o.uid}${fill ? 'gray' : 'sil'})"` : '';
@@ -405,7 +414,8 @@ function svg(opts) {
   const pal = Object.assign({}, base, opts.colors || {});
   const uid = 'lm' + (++uidN) + '_';
   const o = { pal, uid, pic: opts.pic || 'none', l1: opts.l1 || '', l2: opts.l2 || '', l3: opts.l3 || '', font: FONTS[opts.font] ? opts.font : 'western', mono: opts.mono || null,
-    photo: opts.photo || null, photoMode: opts.photoMode === 'fill' ? 'fill' : 'cutout' };
+    photo: opts.photo || null, photoMode: opts.photoMode === 'fill' ? 'fill' : 'cutout',
+    picX: +opts.picX || 0, picY: +opts.picY || 0, picScale: Math.max(0.2, Math.min(4, +opts.picScale || 1)), TW: t.w, TH: t.h };
   const gold = `<linearGradient id="${uid}m" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light(pal.metal, 0.45)}"/><stop offset=".5" stop-color="${pal.metal}"/><stop offset="1" stop-color="${dark(pal.metal, 0.3)}"/></linearGradient>`;
   o.metalFill = o.mono || `url(#${uid}m)`;
   const filters = o.mono && o.photo ? `<filter id="${uid}sil" color-interpolation-filters="sRGB"><feFlood flood-color="${o.mono}"/><feComposite in2="SourceAlpha" operator="in"/></filter><filter id="${uid}gray" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/></filter>` : '';

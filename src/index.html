@@ -181,6 +181,9 @@
         <div class="makerside">
           <div class="field"><label for="lmTemplate">Layout</label><select id="lmTemplate"></select></div>
           <div class="field"><label for="lmPic">Picture</label><select id="lmPic"></select></div>
+          <div class="field"><label for="lmLogoPic">Or a logo from your library</label><select id="lmLogoPic"><option value="">Choose a logo…</option></select></div>
+          <div class="field"><label for="lmPicScale">Picture size <span class="mono" id="lmPicScaleV"></span></label><input type="range" id="lmPicScale" min="30" max="300" value="100">
+            <div class="row-wrap" style="margin-top:6px"><span class="muted hint" style="flex:1">Drag the picture in the preview to move it. Zoom in first to move a background picture.</span><button type="button" class="btn small" id="lmPicReset">Centre it</button></div></div>
           <div class="field photofield"><span class="lab">Or use a real picture</span>
             <div id="lmPicsWrap" hidden><span class="muted hint">My pictures</span><div class="picstrip" id="lmPics"></div></div>
             <div class="row-wrap"><button type="button" class="btn small" id="lmPhotoBtn">Photo or screenshot…</button><button type="button" class="btn small" id="lmShot">From a mod's 3D view</button><button type="button" class="btn small" id="lmPhotoClear" hidden>Use drawn picture</button><button type="button" class="btn small" id="lmPicSave" hidden>Save to My pictures</button></div>
@@ -232,6 +235,13 @@
           <p class="muted">Edited ModHub mods get flagged for an update, and updating them wipes your changes. Saving as your own copy gives the mod a new name, so the game treats it as yours.</p>
           <label class="field-inline">Name tag <input type="text" id="copyTag" class="copytag" maxlength="16" aria-describedby="copyEx"> <span class="muted mono" id="copyEx"></span></label>
           <label class="check"><input type="checkbox" id="saveCopyDefault"> <span>Always save edited mods as my own copy</span></label>
+          <div id="brandSet" hidden>
+            <label class="check"><input type="checkbox" id="brandOn"> <span>List my copies’ vehicles under my own brand in the shop</span></label>
+            <div class="field"><label for="brandTitle">Brand name in the shop</label><input type="text" id="brandTitle" maxlength="40"></div>
+            <div class="field"><label for="brandLogo">Brand logo</label><select id="brandLogo"></select></div>
+            <button type="button" class="btn small" id="btnBrandApply">Put copies already in my mods folder under the brand</button>
+            <p class="muted hint" id="brandInfo"></p>
+          </div>
           <div id="replaceSet" hidden>
             <label class="check"><input type="checkbox" id="replaceOrig"> <span>Then move the original out of the mods folder and switch my savegames to my copy, so vehicles and buildings I already own keep working</span></label>
             <p class="muted mono path" id="origPath"></p>

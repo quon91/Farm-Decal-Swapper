@@ -671,6 +671,31 @@ function tagModTitle(src, tag) {
   return src.slice(0, m.index) + '<title>' + inner + '</title>' + src.slice(m.index + m[0].length);
 }
 
+/* ================= your own shop brand ================= */
+/** Set the brand a store item is listed under (adds <brand> to <storeData> if missing). */
+function setStoreBrand(src, brand) {
+  const sd = src.match(/<storeData>[\s\S]*?<\/storeData>/); if (!sd) return src;
+  let block = sd[0];
+  if (/<brand>[\s\S]*?<\/brand>/.test(block)) block = block.replace(/<brand>[\s\S]*?<\/brand>/, `<brand>${escText(brand)}</brand>`);
+  else { const nl = src.includes('\r\n') ? '\r\n' : '\n', m = block.match(/\n([ \t]*)<name>/); const ind = m ? m[1] : '        ';
+    block = block.replace(/(<\/name>)/, `$1${nl}${ind}<brand>${escText(brand)}</brand>`); if (!block.includes('<brand>')) block = block.replace('<storeData>', `<storeData>${nl}${ind}<brand>${escText(brand)}</brand>`); }
+  return src.slice(0, sd.index) + block + src.slice(sd.index + sd[0].length);
+}
+/** Make a mod depend on another (so the game loads that one first). */
+function addDependency(modDesc, name) {
+  if (new RegExp('<dependency>\\s*' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*</dependency>').test(modDesc)) return modDesc;
+  const nl = modDesc.includes('\r\n') ? '\r\n' : '\n', di = modDesc.indexOf('</dependencies>');
+  if (di >= 0) { const ls = modDesc.lastIndexOf('\n', di) + 1; return modDesc.slice(0, ls) + `        <dependency>${escText(name)}</dependency>${nl}` + modDesc.slice(ls); }
+  const e = modDesc.lastIndexOf('</modDesc>'); if (e < 0) return modDesc; const ls = modDesc.lastIndexOf('\n', e) + 1;
+  return modDesc.slice(0, ls) + `    <dependencies>${nl}        <dependency>${escText(name)}</dependency>${nl}    </dependencies>${nl}` + modDesc.slice(ls);
+}
+/** modDesc.xml of the small mod that adds your brand to the shop. */
+function brandModDesc({ descVersion = 96, brand, title, author = 'Farm Decal Swapper' }) {
+  return `<?xml version="1.0" encoding="utf-8" standalone="no" ?>\n<modDesc descVersion="${+descVersion || 96}">\n    <author>${escText(author)}</author>\n    <version>1.0.0.0</version>\n` +
+    `    <title>\n        <en>${escText(title)} (shop brand)</en>\n    </title>\n    <description>\n        <en>Adds the ${escText(title)} brand to the shop so your own vehicles are listed together. Made with Farm Decal Swapper.</en>\n    </description>\n` +
+    `    <iconFilename>icon.dds</iconFilename>\n    <multiplayer supported="true"/>\n    <brands>\n        <brand name="${escAttr(brand)}" title="${escAttr(title)}" image="brand.dds"/>\n    </brands>\n</modDesc>\n`;
+}
+
 /* ================= shop choices that switch parts on and off ================= */
 const SCENE_TAGS = new Set(['Shape', 'TransformGroup', 'Light', 'Camera', 'Dynamic', 'AudioSource']);
 /** i3d index path of every scene node ("0>3|0|0|4"), as vehicle XML i3dMappings use. Map(nodeId -> path). */
@@ -914,7 +939,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { matToEuler, addLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

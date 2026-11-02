@@ -66,13 +66,17 @@ function initSettings() {
   $('saveCopyDefault').addEventListener('change', () => { store.set('saveCopy', $('saveCopyDefault').checked ? '1' : '0'); $('saveCopy').checked = $('saveCopyDefault').checked; showCopyName(); });
   $('saveCopy').addEventListener('change', showCopyName); // just for this save
   $('replaceOrig').addEventListener('change', () => store.set('replaceOrig', $('replaceOrig').checked ? '1' : '0'));
-  $('copyTag').addEventListener('input', () => { store.set('copyTag', $('copyTag').value); showCopyName(); });
+  $('copyTag').addEventListener('input', () => { store.set('copyTag', $('copyTag').value); showCopyName(); brandUI(); });
+  $('brandOn').checked = pref('brandOn', DEF.brandOn ? '1' : '0') === '1'; $('brandTitle').value = pref('brandTitle', DEF.brandTitle || '');
+  $('brandOn').addEventListener('change', () => { store.set('brandOn', $('brandOn').checked ? '1' : '0'); brandUI(); });
+  $('brandTitle').addEventListener('input', () => { store.set('brandTitle', $('brandTitle').value); brandUI(); });
+  $('brandLogo').addEventListener('change', () => store.set('brandLogo', $('brandLogo').value));
   showCopyName();
   if (APP) {
     $('setBackup').hidden = false; $('setFolder').hidden = false; $('btnFolder').hidden = false;
     APP.backupDir().then(p => $('backupPath').textContent = p);
     $('btnOpenBackups').onclick = () => APP.openPath('backups');
-    $('replaceSet').hidden = false; $('btnOpenOriginals').onclick = () => APP.openPath('originals');
+    $('replaceSet').hidden = false; $('brandSet').hidden = false; $('btnOpenOriginals').onclick = () => APP.openPath('originals');
     APP.originalsDir().then(p => $('origPath').textContent = p);
     APP.version().then(v => $('appVer').textContent = 'v' + v);
     $('sideFoot').textContent = 'Everything runs on your computer. Works offline.';
@@ -154,6 +158,7 @@ $('fixGo').onclick = async () => {
       const mdKey = Object.keys(z.files).filter(k => /(^|\/)moddesc\.xml$/i.test(k)).sort((a, b) => a.length - b.length)[0];
       if (mdKey) { const raw = await z.file(mdKey).async('uint8array'), bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF;
         z.file(mdKey, new TextEncoder().encode((bom ? '\uFEFF' : '') + Core.tagModTitle(new TextDecoder().decode(raw).replace(/^\uFEFF/, ''), copyTag()))); }
+      if (brandActive()) { const r = await brandZip(z); if (r.n) S.fixBrand = Math.max(S.fixBrand || 0, r.descVersion); }
       const data = new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } }));
       const w = await APP.writeNewZip({ dir: S.modsDir, name: newName, data });
       if (w.error === 'exists') { failed.push(`${f.name}: ${newName} already exists. Delete or rename one of them first.`); continue; }
@@ -162,6 +167,7 @@ $('fixGo').onclick = async () => {
       done.push(`${newName}${r.savegames.length ? ` (switched ${r.savegames.map(s => s.savegame).join(', ')})` : ''}${r.dependents && r.dependents.length ? `; the old file stays because ${r.dependents.join(', ')} needs it` : ''}`);
     } catch (e) { failed.push(`${f.name}: ${cleanErr(e)}`); }
   }
+  if (S.fixBrand) { try { await writeBrandMod(S.fixBrand); } catch (e) {} S.fixBrand = 0; }
   say((done.length ? `Done: ${done.join(' · ')}. ` : '') + (failed.length ? `Not changed: ${failed.join(' · ')}` : 'Start the game; these won’t ask to update any more.'), failed.length && !done.length);
   $('fixGo').disabled = false; loadModsFolder();
 };
@@ -375,7 +381,7 @@ function renderPics() {
 $('upPic').addEventListener('change', async e => { const files = [...e.target.files]; e.target.value = ''; let n = 0;
   for (const f of files) { try { await addPicture(await blobToCanvas(f), f.name.replace(/\.[^.]+$/, '')); n++; } catch (err) { toast(`“${f.name}” couldn’t be opened.`); } }
   renderPics(); renderMakerPics(); if (n) toast(`${n} picture${n === 1 ? '' : 's'} added.`); });
-function refreshLogos() { if (S.mod) { renderOpts(); repaintCards(); updateChanges(); if (S.mod.place) { fillPlaceLogos(); drawStickers(); } } if (S.current) { refreshEditorLogos(); drawEditor(); } }
+function refreshLogos() { if (LM.ready) fillLogoPic(); brandUI(); if (S.mod) { renderOpts(); repaintCards(); updateChanges(); if (S.mod.place) { fillPlaceLogos(); drawStickers(); } } if (S.current) { refreshEditorLogos(); drawEditor(); } }
 
 /* ---- library packs (zip of PNGs + names) ---- */
 $('btnExportPack').onclick = async () => {
@@ -1229,6 +1235,55 @@ function updateChanges() {
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
 }
+/* ---- your own brand in the shop (vehicles in your copies are listed under it) ---- */
+const brandTitle = () => ($('brandTitle').value || '').trim() || (farmName().replace(/\w\S*/g, w => w[0] + w.slice(1).toLowerCase()) + ' Farms');
+const brandKey = () => (copyTag() + 'FARMS').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const brandModName = () => `FS25_${copyTag()}_Brand`;
+const brandActive = () => !!(APP && $('brandOn').checked);
+function brandUI() {
+  const sel = $('brandLogo'), cur = sel.value || store.get('brandLogo') || ((window.FDS_DEFAULTS || {}).brandLogo || ''); sel.length = 0;
+  for (const l of S.lib) sel.add(new Option(l.name, l.id)); if (S.lib.some(l => l.id === cur)) sel.value = cur;
+  $('brandInfo').textContent = `In the shop, open Brands and choose “${brandTitle()}”. The app adds a small mod, ${brandModName()}.zip, to your mods folder that creates the brand; keep it installed. Buildings aren’t listed by brand in the game, so they stay where they are.`;
+}
+function fitInto(src, W, H, pad) { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'), k = Math.min(W * (1 - pad * 2) / src.width, H * (1 - pad * 2) / src.height);
+  g.imageSmoothingQuality = 'high'; g.drawImage(src, (W - src.width * k) / 2, (H - src.height * k) / 2, src.width * k, src.height * k); return c; }
+async function writeBrandMod(descVersion) { // the small mod that creates the brand; rewritten each time so logo and name stay current
+  const l = logoById($('brandLogo').value) || S.lib[0]; if (!l) throw new Error('add a logo to your library first');
+  const z = new JSZip(), img = (W, H) => { const c = fitInto(l.canvas, W, H, 0.04); return Core.encodeDDS(c.getContext('2d').getImageData(0, 0, W, H).data, W, H, 'lossless'); };
+  z.file('modDesc.xml', Core.brandModDesc({ descVersion, brand: brandKey(), title: brandTitle() })); z.file('brand.dds', img(512, 256)); z.file('icon.dds', img(256, 256));
+  const data = new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }));
+  return APP.writeNewZip({ dir: S.modsDir, name: brandModName() + '.zip', data, overwrite: true });
+}
+/** Brand every vehicle in a mod's XML texts and make its modDesc depend on the brand mod. texts: Map(rel -> text); returns how many vehicles. */
+function brandTexts(get, set, rels, mdRel) {
+  let n = 0;
+  for (const rel of rels) { if (!/\.xml$/i.test(rel) || /moddesc\.xml$/i.test(rel)) continue; const t = get(rel); if (!t || !Core.vehicleI3d(t) || !t.includes('<storeData>')) continue; set(rel, Core.setStoreBrand(t, brandKey())); n++; }
+  if (n && mdRel) set(mdRel, Core.addDependency(get(mdRel), brandModName()));
+  return n;
+}
+async function brandZip(z) { // same, on a mod zip opened with JSZip
+  const keys = Object.keys(z.files).filter(k => !z.files[k].dir), md = keys.filter(k => /(^|\/)moddesc\.xml$/i.test(k)).sort((a, b) => a.length - b.length)[0];
+  const cache = new Map(), boms = new Map();
+  for (const k of keys.filter(k => /\.xml$/i.test(k))) { const raw = await z.file(k).async('uint8array'); boms.set(k, raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF); cache.set(k, new TextDecoder().decode(raw).replace(/^\uFEFF/, '')); }
+  const changed = new Set(), n = brandTexts(k => cache.get(k), (k, v) => { cache.set(k, v); changed.add(k); }, [...cache.keys()], md);
+  for (const k of changed) z.file(k, new TextEncoder().encode((boms.get(k) ? '\uFEFF' : '') + cache.get(k)));
+  const dv = md ? +((cache.get(md).match(/descVersion="(\d+)"/) || [])[1] || 96) : 96;
+  return { n, descVersion: dv };
+}
+$('btnBrandApply').onclick = async () => {
+  if (!APP || !S.modsDir) return; if (await APP.gameRunning()) { toast('Close Farming Simulator 25 first.'); return; }
+  const mine = (S.mods || []).filter(m => m.kind !== 'folder' && isCopyName(m.name.replace(/\.zip$/i, '')) && m.name.toLowerCase() !== (brandModName() + '.zip').toLowerCase());
+  if (!mine.length) { toast('No copies of yours in the mods folder yet.'); return; }
+  let total = 0, mods = 0, dv = 96;
+  for (const m of mine) {
+    try { const z = await JSZip.loadAsync(await APP.readFile(m.path)), r = await brandZip(z); dv = Math.max(dv, r.descVersion); if (!r.n) continue;
+      await APP.writeNewZip({ dir: S.modsDir, name: m.name, data: new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } })), overwrite: true, backup: true });
+      total += r.n; mods++; } catch (e) { toast(`${m.name}: ${cleanErr(e)}`); }
+  }
+  try { await writeBrandMod(dv); } catch (e) { toast('Couldn’t write the brand mod: ' + cleanErr(e)); return; }
+  toast(`${total} vehicle${total === 1 ? '' : 's'} in ${mods} cop${mods === 1 ? 'y' : 'ies'} now listed under “${brandTitle()}”. Backups are in the Backups folder.`); loadModsFolder();
+};
+
 /* ---- saving as a separate copy (ModHub mods: the game wants to "update" an edited original) ---- */
 const copyTag = () => ($('copyTag').value || '').replace(/[^A-Za-z0-9]+/g, '') || 'MY';
 /** FS25_Workstar_Pack -> FS25_DBF_Workstar_Pack. A name that already carries the tag is kept, so editing your copy saves over it. */
@@ -1305,6 +1360,8 @@ async function saveMod() {
     const asCopy = savingCopy(), saveName = asCopy ? copyName(M.name) : M.name;
     if (M.kind !== 'folder') changed.push({ rel: 'farm_decal_swapper.txt', data: new TextEncoder().encode(`Edited with Farm Decal Swapper on ${new Date().toISOString().slice(0, 10)}.\r\nThis is not the original ModHub file. To get the original back, download it again from ModHub.\r\n`) });
     if (asCopy) { const md = modDescPath(); if (md && !textOut.has(md)) textOut.set(md, Core.tagModTitle(xmlText(md), copyTag())); else if (md) textOut.set(md, Core.tagModTitle(textOut.get(md), copyTag())); }
+    let branded = 0;
+    if (asCopy && brandActive()) branded = brandTexts(k => textOut.get(k) || xmlText(k), (k, v) => textOut.set(k, v), [...M.files.keys()], modDescPath());
     for (const [rel, s] of textOut) { const raw = M.files.get(rel) || await z.file(P + rel).async('uint8array'); const bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF; changed.push({ rel, data: new TextEncoder().encode((bom ? '﻿' : '') + s) }); }
 
     let result;
@@ -1323,6 +1380,7 @@ async function saveMod() {
       else { const r = await offerFile(saveName, blob, 'zip'); result = r === 'saved' ? { saved: true, name: saveName, size: blob.size } : { canceled: true }; }
     }
     if (result && result.canceled) { msg.hidden = true; return; }
+    if (branded) { try { const md = modDescPath(); await writeBrandMod(md ? +((xmlText(md).match(/descVersion="(\d+)"/) || [])[1] || 96) : 96); } catch (e) { branded = 0; toast('Couldn’t write the brand mod: ' + cleanErr(e)); } }
     let swap = null;
     if (asCopy && APP && $('replaceOrig').checked && saveName !== M.name && M.path && result.path) {
       say('Moving the original out of the mods folder and switching your savegames to your copy…'); await tick();
@@ -1331,7 +1389,7 @@ async function saveMod() {
     }
     msg.textContent = swap && !swap.error
       ? `Saved your copy as ${saveName}. ` + (swap.movedTo ? `The original moved to ${swap.movedTo}. ` : swap.dependents && swap.dependents.length ? `The original stays in your mods folder because ${swap.dependents.join(', ')} need${swap.dependents.length === 1 ? 's' : ''} it. ` : '') +
-        (swap.savegames.length ? `Switched ${swap.savegames.map(s => s.savegame).join(', ')} to your copy, so what you own keeps working (old savegame files are in ${swap.backupDir}). ` : 'No savegame used this mod yet. ') + 'Start the game to see it.'
+        (swap.savegames.length ? `Switched ${swap.savegames.map(s => s.savegame).join(', ')} to your copy, so what you own keeps working (old savegame files are in ${swap.backupDir}). ` : 'No savegame used this mod yet. ') + (branded ? `Its vehicles are listed under “${brandTitle()}” in the shop. ` : '') + 'Start the game to see it.'
       : swap && swap.error
       ? `Saved your copy as ${saveName}, but the original wasn’t moved: ` + (swap.error === 'game-running' ? 'the game is running. Close it, then save again to finish.' : swap.error)
       : asCopy && saveName !== M.name && !(swap && swap.movedTo)
@@ -1347,7 +1405,7 @@ async function saveMod() {
 }
 
 /* ================= logo maker ================= */
-const LM = { ready: false, mono: '', timer: 0, custom: null };
+const LM = { ready: false, mono: '', timer: 0, custom: null, picX: 0, picY: 0, picScale: 1 };
 const farmName = () => ((window.FDS_DEFAULTS || {}).farmName || 'MY FARM');
 const LM_PRESETS = {
   farm: { template: 'seal', pic: 'cottonField', l2: 'FARMS', l3: '', palette: 'delta', font: 'western' },
@@ -1392,6 +1450,16 @@ function initMaker() {
   };
   $('lmPhotoClear').onclick = () => { LM.photo = null; LM.photoSrc = null; LM.picId = null; lmPhotoUI(); renderMakerPics(); lmChanged(); };
   $('lmPicSave').onclick = lmSavePicture; renderMakerPics();
+  // move and size the picture
+  $('lmPicScale').addEventListener('input', e => { LM.picScale = +e.target.value / 100; lmChanged(); });
+  $('lmPicReset').onclick = () => { LM.picX = 0; LM.picY = 0; LM.picScale = 1; $('lmPicScale').value = 100; lmChanged(); };
+  (() => { const cv = $('lmCanvas'); let d = null;
+    cv.addEventListener('pointerdown', e => { d = { x: e.clientX, y: e.clientY, px: LM.picX, py: LM.picY }; cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing'; });
+    cv.addEventListener('pointermove', e => { if (!d) return; const r = cv.getBoundingClientRect(); LM.picX = d.px + (e.clientX - d.x) / r.width; LM.picY = d.py + (e.clientY - d.y) / r.height; lmChanged(); });
+    const end = () => { d = null; cv.style.cursor = 'grab'; }; cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end); cv.style.cursor = 'grab'; })();
+  // a logo from the library as the picture
+  $('lmLogoPic').addEventListener('change', e => { const l = S.lib.find(x => x.id === e.target.value); e.target.value = ''; if (!l) return; lmSetPhoto(l.canvas, l.name, false); $('lmPhotoMode').value = 'cutout'; lmChanged(); });
+  fillLogoPic();
   $('lmPhotoMode').addEventListener('change', lmChanged);
   $('lmPhotoBg').addEventListener('change', lmPhotoProcess); $('lmPhotoTol').addEventListener('input', () => { clearTimeout(LM.ptimer); LM.ptimer = setTimeout(lmPhotoProcess, 120); });
   lmPhotoUI();
@@ -1407,6 +1475,7 @@ function lmPhotoProcess() {
   if ($('lmPhotoBg').checked) { const src = document.createElement('canvas'); src.width = c.width; src.height = c.height; src.getContext('2d').drawImage(c, 0, 0); c = trimCanvas(removeBackground(src, edgeColor(src), +$('lmPhotoTol').value, 14, false)); }
   LM.photo = c; LM.photoUrl = c.toDataURL('image/png'); lmPhotoUI(); LM.nameEdited = false; lmChanged();
 }
+function fillLogoPic() { const sel = $('lmLogoPic'); if (!sel) return; sel.length = 1; for (const l of S.lib) sel.add(new Option(l.name, l.id)); }
 function renderMakerPics() {
   const box = $('lmPics'); if (!box) return; box.innerHTML = '';
   $('lmPicsWrap').hidden = !S.pics.length;
@@ -1435,6 +1504,7 @@ function lmApply(st) {
   $('lmL1').value = st.l1 || ''; $('lmL2').value = st.l2 || ''; $('lmL3').value = st.l3 || '';
   $('lmPal').value = st.palette || 'delta'; lmSwatches(st.colors || L.PALETTES[st.palette] || L.PALETTES.delta);
   LM.mono = st.mono || ''; document.querySelectorAll('#lmMono button').forEach(x => x.setAttribute('aria-pressed', x.dataset.m === LM.mono));
+  LM.picX = +st.picX || 0; LM.picY = +st.picY || 0; LM.picScale = +st.picScale || 1; $('lmPicScale').value = Math.round(LM.picScale * 100);
   lmChanged();
 }
 function lmOpts(withFonts) {
@@ -1443,6 +1513,7 @@ function lmOpts(withFonts) {
     palette: pal === 'custom' ? 'delta' : pal, colors: pal === 'custom' ? { bg: $('lmBg').value, metal: $('lmMetal').value, ink: $('lmInk').value, text: $('lmText').value, soft: '#f4f1e8', accent: $('lmMetal').value } : null, mono: LM.mono || null };
   if (withFonts) o.fonts = window.LM_FONTS;
   if (LM.photo) { o.photo = LM.photoUrl; o.photoMode = $('lmPhotoMode').value; }
+  o.picX = LM.picX; o.picY = LM.picY; o.picScale = LM.picScale;
   return o;
 }
 function lmDefaultName() { const o = lmOpts(); return [o.l1, o.l2].filter(Boolean).join(' ') + ' - ' + window.LogoMaker.TEMPLATES[o.template].label.replace(/ \(.*\)/, '') + (o.mono ? (o.mono === '#ffffff' ? ' (white)' : ' (black)') : ''); }
@@ -1453,6 +1524,7 @@ function lmRecipe() { // everything needed to open this logo in the maker again
   return o;
 }
 function lmChanged() {
+  $('lmPicScaleV').textContent = Math.round(LM.picScale * 100) + '%';
   const o = lmOpts(); try { const st = Object.assign({}, o, { palette: $('lmPal').value }); delete st.photo; store.set('lmState', JSON.stringify(st)); } catch (e) {}
   if (!LM.nameEdited) $('lmName').value = lmDefaultName();
   clearTimeout(LM.timer); LM.timer = setTimeout(lmDraw, 60);
@@ -1526,6 +1598,6 @@ async function lmPng() {
     store.set('seededIds', JSON.stringify(done)); store.set('seeded', '1');
   }
   await loadPictures(); renderPics();
-  renderLib(); setView('mods'); loadModsFolder();
+  renderLib(); brandUI(); setView('mods'); loadModsFolder();
 })();
 })();
