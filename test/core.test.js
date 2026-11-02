@@ -90,4 +90,11 @@ test('licence plates: mounts listed in the vehicle file, angles round-trip', () 
   assert.ok(fresh.includes('<licensePlates defaultPlacement="BOTH">') && fresh.includes('<i3dMappings>'));
   for (const r of [[10, 20, 30], [-170, 80, 45], [0, -90, 0], [90, 0, 180]]) { const M = Core.mat([0, 0, 0], r, [1, 1, 1]), M2 = Core.mat([0, 0, 0], Core.matToEuler(M), [1, 1, 1]); for (let k = 0; k < 16; k++) assert.ok(Math.abs(M[k] - M2[k]) < 1e-9); }
 });
+test('licence plates: game plate spots are found through i3d mappings, and can be taken off', () => {
+  const veh = '<vehicle>\n    <licensePlates defaultPlacement="BOTH">\n        <licensePlate node="plateBack" position="BACK" preferedType="SQUARISH" />\n        <licensePlate node="0>4|1" position="FRONT" />\n    </licensePlates>\n    <i3dMappings>\n        <i3dMapping id="plateBack" node="0>2|3|0"/>\n    </i3dMappings>\n</vehicle>';
+  assert.strictEqual(JSON.stringify(Core.licensePlateSpots(veh)), JSON.stringify([{ node: 'plateBack', path: '0>2|3|0', position: 'BACK', type: 'SQUARISH' }, { node: '0>4|1', path: '0>4|1', position: 'FRONT', type: 'SQUARISH' }]));
+  const off = Core.removeLicensePlates(veh);
+  assert.ok(!off.includes('<licensePlate') && off.includes('<i3dMapping id="plateBack"') && Core.licensePlateSpots(off).length === 0);
+  assert.strictEqual(Core.removeLicensePlates('<vehicle>\n</vehicle>'), '<vehicle>\n</vehicle>');
+});
 console.log(`\n${n} tests passed`);

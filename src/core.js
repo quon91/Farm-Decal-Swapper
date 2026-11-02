@@ -753,6 +753,21 @@ function addLicensePlates(src, plates) {
   const e = out.lastIndexOf('</vehicle>'), ls = out.lastIndexOf('\n', e) + 1;
   return out.slice(0, ls) + `${ind}<licensePlates defaultPlacement="BOTH">${nl}${rows}${ind}</licensePlates>${nl}` + out.slice(ls);
 }
+/** The game plate spots a vehicle XML lists: [{ node (as written), path (index path), position, type }]. */
+function licensePlateSpots(src) {
+  const block = (src.match(/<licensePlates\b(?:[^>"]|"[^"]*")*?(?:\/>|>[\s\S]*?<\/licensePlates>)/) || [''])[0], maps = new Map(), out = [];
+  for (const m of src.matchAll(/<i3dMapping\b(?:[^>"]|"[^"]*")*>/g)) { const id = (m[0].match(/\bid="([^"]*)"/) || [])[1], node = (m[0].match(/\bnode="([^"]*)"/) || [])[1]; if (id && node) maps.set(id, node); }
+  for (const m of block.matchAll(/<licensePlate\b(?:[^>"]|"[^"]*")*>/g)) {
+    const a = k => (m[0].match(new RegExp('\\b' + k + '="([^"]*)"')) || [])[1];
+    const node = a('node'); if (!node) continue;
+    out.push({ node, path: /^\d+>/.test(node) ? node : maps.get(node) || null, position: (a('position') || 'BACK').toUpperCase(), type: (a('preferedType') || 'SQUARISH').toUpperCase() });
+  }
+  return out;
+}
+/** Take the game's plates off a vehicle: drops its <licensePlates> block (no block, no plate). */
+function removeLicensePlates(src) {
+  return src.replace(/[ \t]*<licensePlates\b(?:[^>"]|"[^"]*")*?(?:\/>|>[\s\S]*?<\/licensePlates>)[ \t]*\r?\n?/, '');
+}
 
 /* ================= adding new geometry (stickers) ================= */
 /**
@@ -939,7 +954,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

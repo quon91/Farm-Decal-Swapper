@@ -96,12 +96,23 @@
             <div class="field" id="fPlaceModel"><label for="placeModel">Model</label><select id="placeModel"></select></div>
             <div class="field"><span class="lab">Click the model to place</span><div class="seg" id="placeMode" role="group" aria-label="What to place"><button type="button" data-m="logo" aria-pressed="true">Logo</button><button type="button" data-m="plate" aria-pressed="false">Licence plate</button></div></div>
             <div class="field" id="fPlaceLogo"><label for="placeLogo">Logo</label><select id="placeLogo"></select></div>
-            <p class="muted hint" id="plateHint" hidden>Click the back (or front) of the vehicle where the plate should go. The game draws a real plate there, and you type its text when you buy or configure the vehicle.</p>
+            <div id="plateBox" hidden>
+              <div class="field"><span class="lab">Plate</span><div class="seg" id="plStyle" role="group" aria-label="Which plate"><button type="button" data-s="mine" aria-pressed="true">My own plate</button><button type="button" data-s="game">Game plate</button></div></div>
+              <div id="myPlateBox">
+                <img id="plPreview" class="platepv" alt="Your plate">
+                <div class="field"><label for="plText">Plate letters</label><input type="text" id="plText" maxlength="10" autocomplete="off" spellcheck="false"></div>
+                <div class="field"><label for="plDesign">Design</label><select id="plDesign"></select></div>
+                <p class="muted hint">Make your own design in the Logo maker with the <b>Licence plate</b> layout and add it to your library: it shows up here. Each vehicle gets the next number.</p>
+                <div id="plSpots" hidden><p class="muted hint" id="plSpotsInfo"></p><button type="button" class="btn small primary" id="plUseSpots">Put my plate on them</button></div>
+                <label class="check" id="plGameOffRow" hidden><input type="checkbox" id="plGameOff" checked> <span>Take the game’s own plates off this vehicle</span></label>
+              </div>
+              <p class="muted hint" id="plateHint"></p>
+            </div>
             <div class="stickedit" id="plateEdit" hidden>
-              <div class="row-between"><h3>Licence plate</h3><button type="button" class="btn small danger" id="plDelete">Delete</button></div>
-              <div class="field"><label for="plPos">Which end</label><select id="plPos"><option value="BACK">Back</option><option value="FRONT">Front</option></select></div>
+              <div class="row-between"><h3 id="plTitle">Licence plate</h3><button type="button" class="btn small danger" id="plDelete">Delete</button></div>
+              <div class="field" id="fPlPos"><label for="plPos">Which end</label><select id="plPos"><option value="BACK">Back</option><option value="FRONT">Front</option></select></div>
               <div class="field"><label for="plType">Plate shape</label><select id="plType"><option value="SQUARISH">Square (US style)</option><option value="ELONGATED">Wide (European style)</option></select></div>
-              <div class="field"><label for="plRot">Tilt <span class="mono" id="plRotV"></span></label><input type="range" id="plRot" min="-45" max="45" step="1"></div>
+              <div class="field" id="fPlRot"><label for="plRot">Tilt <span class="mono" id="plRotV"></span></label><input type="range" id="plRot" min="-45" max="45" step="1"></div>
               <p class="muted hint" id="plInfo"></p>
             </div>
             <div class="stickedit" id="stickerEdit" hidden>

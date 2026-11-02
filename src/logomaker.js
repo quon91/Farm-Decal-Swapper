@@ -405,6 +405,20 @@ const TEMPLATES = {
     s += `<text x="${objPic ? 1170 : W / 2}" y="760" font-family="Bebas Neue" font-size="560" text-anchor="middle" letter-spacing="20"${fitText(o.l1, 'bold', 560, objPic ? 1450 : 1800, 20) ? ` textLength="${objPic ? 1450 : 1800}" lengthAdjust="spacingAndGlyphs"` : ''} fill="${o.mono || o.pal.ink}">${esc(o.l1)}</text>`;
     s += text(o, o.l3, W / 2, H - 110, 96, 1300, { font: 'bold', spacing: 22, fill: o.mono || o.pal.bg, stroke: null, shadow: false });
     return s; } },
+  plateWide: { label: 'Licence plate (wide)', w: 2048, h: 434, draw(o) { // European size, 520 × 110 mm
+    const u = o.uid, W = 2048, H = 434, B = 250;
+    let s = '';
+    if (o.mono) s += `<rect x="16" y="16" width="${W - 32}" height="${H - 32}" rx="44" fill="none" stroke="${o.mono}" stroke-width="22"/><line x1="${B}" y1="40" x2="${B}" y2="${H - 40}" stroke="${o.mono}" stroke-width="10"/>`;
+    else s += `<linearGradient id="${u}pl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${o.pal.soft}"/><stop offset="1" stop-color="${mix(o.pal.soft, o.pal.metal, 0.25)}"/></linearGradient>
+      <clipPath id="${u}pc"><rect x="16" y="16" width="${W - 32}" height="${H - 32}" rx="40"/></clipPath>
+      <rect width="${W}" height="${H}" rx="54" fill="${o.pal.ink}"/><rect x="16" y="16" width="${W - 32}" height="${H - 32}" rx="40" fill="url(#${u}pl)"/>
+      <rect x="16" y="16" width="${B - 16}" height="${H - 32}" fill="${o.pal.bg}" clip-path="url(#${u}pc)"/>`;
+    const band = o.l3 || o.l2, bandFill = o.mono || o.pal.soft;
+    if (picKind(o) === 'object') s += art(Object.assign({}, o, { mono: o.mono || o.pal.soft }), 40, 40, B - 60, band ? 240 : H - 80, { pad: 0.04 });
+    if (band) s += text(o, band, (B + 16) / 2, picKind(o) === 'object' ? H - 56 : H / 2 + 34, picKind(o) === 'object' ? 64 : 96, B - 50, { font: 'bold', spacing: 6, fill: bandFill, stroke: null, shadow: false });
+    const tw = W - B - 140, fit = fitText(o.l1, 'bold', 380, tw, 16);
+    s += `<text x="${(B + W) / 2}" y="${H / 2 + 136}" font-family="Bebas Neue" font-size="380" text-anchor="middle" letter-spacing="16"${fit ? ` textLength="${tw}" lengthAdjust="spacingAndGlyphs"` : ''} fill="${o.mono || o.pal.ink}">${esc(o.l1)}</text>`;
+    return s; } },
 };
 
 /* ---------------- build ---------------- */
