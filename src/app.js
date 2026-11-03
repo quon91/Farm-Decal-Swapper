@@ -24,6 +24,7 @@ function status(msg, kind) { const el = $('status'); if (!msg) { el.hidden = tru
 let toastT = null;
 function toast(msg, ms = 3800) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms); }
 function dataBlob(u) { const [h, b] = u.split(','), bin = atob(b), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new Blob([a], { type: h.slice(5).split(';')[0] }); }
+const LIB = { selecting: false, sel: new Set(), dupes: new Set() };
 const canvasBlob = c => new Promise(r => c.toBlob(r, 'image/png'));
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
 async function blobToCanvas(blob) { const url = URL.createObjectURL(blob); try { return toCanvas(await loadImg(url)); } finally { URL.revokeObjectURL(url); } }
@@ -346,12 +347,22 @@ function renderLib() {
   const box = $('lib'); box.innerHTML = '';
   $('navLibCount').textContent = S.lib.length || '';
   if (!S.lib.length) { box.innerHTML = '<div class="empty" style="grid-column:1/-1">Your library is empty. Use <b>Add logos</b> to bring in your farm logo and any brands you want, or drop image files here.</div>'; return; }
+  const q = ($('libSearch').value || '').trim().toLowerCase(), sel = LIB.sel;
+  for (const id of [...sel]) if (!S.lib.some(l => l.id === id)) sel.delete(id);
+  libSelUI();
   S.lib.forEach((l, i) => {
-    const el = document.createElement('div'); el.className = 'libcard';
+    if (q && !q.split(/\s+/).every(w => l.name.toLowerCase().includes(w))) return;
+    const el = document.createElement('div'); el.className = 'libcard' + (sel.has(l.id) ? ' sel' : '') + (LIB.dupes.has(l.id) ? ' dupe' : '');
     el.innerHTML = `<div class="pv checker"><img alt=""></div><div class="body"><input type="text" aria-label="Logo name"><span class="dim"></span>
       <div class="acts"><button type="button" class="btn small" data-a="edit" hidden>Edit in Logo maker</button><button type="button" class="btn small" data-a="bg">Remove background</button><button type="button" class="btn small" data-a="up" aria-label="Move earlier">←</button><button type="button" class="btn small" data-a="down" aria-label="Move later">→</button><button type="button" class="btn small danger" data-a="del">Delete</button></div></div>`;
     el.querySelector('img').src = thumbURL(l.canvas);
-    const nm = el.querySelector('input'); nm.value = l.name;
+    if (LIB.selecting) { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'selbox'; cb.checked = sel.has(l.id); cb.setAttribute('aria-label', 'Select ' + l.name);
+      cb.onchange = () => { if (cb.checked) sel.add(l.id); else sel.delete(l.id); el.classList.toggle('sel', cb.checked); libSelUI(); }; el.prepend(cb);
+      el.querySelector('.pv').onclick = () => { cb.checked = !cb.checked; cb.onchange(); }; }
+    const png = document.createElement('button'); png.type = 'button'; png.className = 'btn small'; png.dataset.a = 'png'; png.textContent = 'Save PNG';
+    png.onclick = async () => { try { const r = await offerFile(Core.slug(l.name) + '.png', await canvasBlob(l.canvas), 'png'); if (r === 'saved') toast('Saved ' + l.name + '.png'); } catch (e) { toast('Couldn’t save: ' + e.message); } };
+    el.querySelector('.acts').prepend(png);
+    const nm = el.querySelector('input[type=text]'); nm.value = l.name;
     nm.addEventListener('change', () => { l.name = nm.value.trim() || 'Logo'; nm.value = l.name; saveRec(l); refreshLogos(); });
     el.querySelector('.dim').textContent = `${l.canvas.width} × ${l.canvas.height} px` + (l.needsBg && !l.cleaned ? ' · has a solid background' : '') + (l.cleaned ? ' · background removed' : '');
     el.querySelector('[data-a=bg]').onclick = () => openBg(l);
@@ -402,14 +413,56 @@ $('upPic').addEventListener('change', async e => { const files = [...e.target.fi
   renderPics(); renderMakerPics(); if (n) toast(`${n} picture${n === 1 ? '' : 's'} added.`); });
 function refreshLogos() { if (LM.ready) fillLogoPic(); brandUI(); if (S.mod) { renderOpts(); repaintCards(); updateChanges(); if (S.mod.place) { fillPlaceLogos(); drawStickers(); } } if (S.current) { refreshEditorLogos(); drawEditor(); } }
 
+/* ---- library tools: search, select several, find duplicates ---- */
+function libSelUI() {
+  const n = LIB.sel.size; $('libSelect').setAttribute('aria-pressed', LIB.selecting); $('libSelect').textContent = LIB.selecting ? 'Done' : 'Select';
+  $('libSelInfo').hidden = !LIB.selecting; $('libSelInfo').textContent = `${n} selected`; $('libSelAll').hidden = !LIB.selecting; $('libDelSel').hidden = !LIB.selecting; $('libDelSel').disabled = !n;
+}
+$('libSearch').addEventListener('input', () => renderLib());
+$('libSelect').onclick = () => { LIB.selecting = !LIB.selecting; if (!LIB.selecting) { LIB.sel.clear(); LIB.dupes.clear(); } renderLib(); };
+$('libSelAll').onclick = () => { const q = ($('libSearch').value || '').trim().toLowerCase(); for (const l of S.lib) if (!q || q.split(/\s+/).every(w => l.name.toLowerCase().includes(w))) LIB.sel.add(l.id); renderLib(); };
+$('libDelSel').onclick = async () => {
+  const gone = S.lib.filter(l => LIB.sel.has(l.id)); if (!gone.length) return;
+  for (const l of gone) await dbDel(l.id);
+  S.lib = S.lib.filter(l => !LIB.sel.has(l.id)); S.lib.forEach((x, k) => { x.order = k; });
+  if (S.mod) { const keep = new Set(S.lib.map(l => l.id)); for (const ed of S.mod.edits.values()) if (ed.logo && !keep.has(ed.logo)) ed.logo = S.lib[0] ? S.lib[0].id : null; for (const g of S.mod.groups.values()) g.logos = g.logos.filter(x => keep.has(x)); }
+  LIB.sel.clear(); LIB.dupes.clear(); renderLib(); refreshLogos(); toast(`Deleted ${gone.length} logo${gone.length === 1 ? '' : 's'}.`);
+};
+function logoPrint(l) { // a tiny greyscale copy for spotting the same picture at different sizes
+  if (l._print && l._print.c === l.canvas) return l._print.v;
+  const m = document.createElement('canvas'); m.width = m.height = 96; const mg = m.getContext('2d'); mg.imageSmoothingQuality = 'high'; mg.drawImage(l.canvas, 0, 0, 96, 96); // two steps, so big and small copies shrink alike
+  const c = document.createElement('canvas'); c.width = c.height = 24; const g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingQuality = 'high'; g.drawImage(m, 0, 0, 24, 24);
+  const d = g.getImageData(0, 0, 24, 24).data, v = new Float32Array(576 * 7); // colour and how colourful it is: a grey or white version is not a duplicate
+  for (let i = 0; i < 576; i++) { const a = d[i * 4 + 3] / 255, r = d[i * 4] * a, gg = d[i * 4 + 1] * a, b = d[i * 4 + 2] * a, mean = (r + gg + b) / 3;
+    v.set([r, gg, b, (r - mean) * 3, (gg - mean) * 3, (b - mean) * 3, a * 255], i * 7); }
+  l._print = { c: l.canvas, v }; return v;
+}
+$('libDupes').onclick = () => {
+  // logos that show the same picture (any size): keep the biggest of each set, select the others
+  const groups = [], used = new Set();
+  for (const a of S.lib) { if (used.has(a.id)) continue; const pa = logoPrint(a), ra = a.canvas.width / a.canvas.height, g = [a];
+    for (const b of S.lib) { if (b === a || used.has(b.id)) continue; if (Math.abs(b.canvas.width / b.canvas.height - ra) > ra * 0.04) continue;
+      const pb = logoPrint(b); let diff = 0, n = 0; // average difference over the pixels either logo covers
+      for (let i = 0; i < pa.length; i += 7) { if (pa[i + 6] < 8 && pb[i + 6] < 8) continue; n++; let dc = 0, dk = 0;
+        for (const k of [0, 1, 2, 6]) dc += Math.abs(pa[i + k] - pb[i + k]); for (const k of [3, 4, 5]) dk += Math.abs(pa[i + k] - pb[i + k]); diff += dc / 4 + dk / 3; }
+      if (n && diff / n < 15) { g.push(b); used.add(b.id); } }
+    if (g.length > 1) { used.add(a.id); groups.push(g); } }
+  LIB.sel.clear(); LIB.dupes.clear();
+  for (const g of groups) { g.sort((x, y) => (y.recipe ? 1 : 0) - (x.recipe ? 1 : 0) || y.canvas.width * y.canvas.height - x.canvas.width * x.canvas.height); g.slice(1).forEach(l => { LIB.sel.add(l.id); LIB.dupes.add(l.id); }); }
+  LIB.selecting = true; $('libSearch').value = ''; renderLib();
+  toast(groups.length ? `Found ${LIB.sel.size} duplicate${LIB.sel.size === 1 ? '' : 's'}. The biggest (or editable) copy of each is kept; check the ticked ones, then Delete selected.` : 'No duplicates found.');
+};
 /* ---- library packs (zip of PNGs + names) ---- */
-$('btnExportPack').onclick = async () => {
-  if (!S.lib.length) { toast('Your library is empty.'); return; }
+async function libraryPack() {
   const z = new JSZip(), meta = [];
   for (const l of S.lib) { const f = `logos/${Core.slug(l.name)}_${l.id.slice(-4)}.png`; z.file(f, await canvasBlob(l.canvas)); meta.push({ name: l.name, file: f, order: l.order, recipe: l.recipe || undefined }); }
   const pics = []; for (const p of S.pics) { const f = `pictures/${Core.slug(p.name)}_${p.id.slice(-4)}.png`; z.file(f, await canvasBlob(p.canvas)); pics.push({ name: p.name, file: f, cut: p.cut }); }
   z.file('library.json', JSON.stringify({ app: 'Farm Decal Swapper', version: 1, logos: meta, pictures: pics }, null, 2));
-  const blob = await z.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  return z.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+}
+$('btnExportPack').onclick = async () => {
+  if (!S.lib.length) { toast('Your library is empty.'); return; }
+  const blob = await libraryPack();
   try { const r = await offerFile('logo-library.zip', blob, 'zip'); if (r === 'saved') toast('Library exported.'); } catch (e) { toast('Couldn’t save: ' + e.message); }
 };
 $('btnImportPack').onclick = () => $('packIn').click();
@@ -419,6 +472,23 @@ $('packIn').addEventListener('change', async e => {
     const z = await JSZip.loadAsync(f), metaF = z.file('library.json'); let list, picList = [];
     if (metaF) { const meta = JSON.parse(await metaF.async('string')); list = meta.logos || []; picList = meta.pictures || []; }
     else list = Object.keys(z.files).filter(n => /\.(png|webp|jpe?g)$/i.test(n)).map(n => ({ name: baseName(n).replace(/\.[^.]+$/, ''), file: n }));
+    // add to the library, or swap the whole library for the pack (after keeping a copy of it)
+    let mode = 'add';
+    if (S.lib.length) {
+      $('importWhat').textContent = `This pack has ${list.length} logo${list.length === 1 ? '' : 's'}${picList.length ? ` and ${picList.length} picture${picList.length === 1 ? '' : 's'}` : ''}. Your library has ${S.lib.length}.`;
+      $('importDlg').hidden = false;
+      mode = await new Promise(r => { $('importAdd').onclick = () => r('add'); $('importReplace').onclick = () => r('replace'); $('importCancel').onclick = () => r(null); });
+      $('importDlg').hidden = true; if (!mode) return;
+    }
+    if (mode === 'replace') {
+      const backup = await libraryPack(), name = `Logo library before import ${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.zip`;
+      let kept = null;
+      try { if (APP && APP.writeNewZip) { const dir = await APP.backupDir(), w = await APP.writeNewZip({ dir, name, data: new Uint8Array(await backup.arrayBuffer()) }); if (w && w.saved) kept = w.path; }
+        else if (await offerFile(name, backup, 'zip') === 'saved') kept = name; } catch (err) { console.warn(err); }
+      if (!kept) { toast('Couldn’t keep a copy of your library, so nothing was replaced.'); return; }
+      for (const l of S.lib) await dbDel(l.id); S.lib = [];
+      toast('Your old library is kept in ' + kept);
+    }
     let n = 0, skipped = 0;
     for (const it of list) { const zf = z.file(it.file); if (!zf) continue; const blob = new Blob([await zf.async('uint8array')], { type: 'image/png' }); const rec = await addLogo(blob, it.name, { cleaned: true });
       if (S.lib.some(l => l !== rec && l.name.toLowerCase() === rec.name.toLowerCase() && l.canvas.width === rec.canvas.width && l.canvas.height === rec.canvas.height)) { S.lib.pop(); skipped++; continue; } // already have it

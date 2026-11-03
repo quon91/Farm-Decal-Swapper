@@ -171,6 +171,14 @@
           <input type="file" id="packIn" accept=".zip,application/zip" hidden>
         </div>
       </header>
+      <div class="libtools" id="libTools">
+        <input type="search" id="libSearch" placeholder="Search your logos" aria-label="Search your logos">
+        <button type="button" class="btn small" id="libSelect" aria-pressed="false">Select</button>
+        <button type="button" class="btn small" id="libDupes">Find duplicates</button>
+        <span class="muted" id="libSelInfo" hidden></span>
+        <button type="button" class="btn small" id="libSelAll" hidden>Select all shown</button>
+        <button type="button" class="btn small danger" id="libDelSel" hidden>Delete selected</button>
+      </div>
       <div class="libgrid" id="lib"></div>
       <p class="muted tip">Tip: inside a mod, open any texture, mark a logo with your mouse and choose <b>Add area to library</b>. For JPGs or logos on a solid colour, use <b>Remove background</b>.</p>
       <div class="picsec">
@@ -334,6 +342,14 @@
 </div>
 
 <!-- ======= background remover ======= -->
+<div class="overlay" id="importDlg" hidden>
+  <div class="dlgbox" role="dialog" aria-modal="true" aria-labelledby="importHead">
+    <h2 id="importHead">Import logo pack</h2>
+    <p class="muted" id="importWhat"></p>
+    <div class="edacts"><button type="button" class="btn primary" id="importAdd">Add to my library</button><button type="button" class="btn" id="importReplace">Replace my library with it</button><button type="button" class="btn" id="importCancel">Cancel</button></div>
+    <p class="muted hint">Replace keeps a copy of your current library first (as a pack you can import again), then swaps in the pack. Mods you already saved keep their logos.</p>
+  </div>
+</div>
 <div class="overlay" id="fixDlg" hidden>
   <div class="dlgbox" role="dialog" aria-modal="true" aria-labelledby="fixHead">
     <h2 id="fixHead">Stop the “needs updating” message</h2>

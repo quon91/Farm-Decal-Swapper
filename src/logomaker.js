@@ -414,6 +414,7 @@ const TEMPLATES = {
     s += `<text x="${objPic ? 1170 : W / 2}" y="760" font-family="Bebas Neue" font-size="560" text-anchor="middle" letter-spacing="20"${fitText(o.l1, 'bold', 560, objPic ? 1450 : 1800, 20) ? ` textLength="${objPic ? 1450 : 1800}" lengthAdjust="spacingAndGlyphs"` : ''} fill="${o.mono || o.pal.ink}">${esc(o.l1)}</text>`;
     s += text(o, o.l3, W / 2, H - 110, 96, 1300, { font: 'bold', spacing: 22, fill: o.mono || o.pal.bg, stroke: null, shadow: false });
     return s; } },
+  picture: { label: 'Picture only', w: 2048, h: 2048, draw(o) { return art(o, 24, 24, 2000, 2000, { pad: 0 }); } },
   words: { label: 'Words (two lines)', w: 2400, h: 900, draw(o) { return words(o, false); } },
   wordsLine: { label: 'Words (one line)', w: 3000, h: 420, draw(o) { return words(o, true); } },
   plateWide: { label: 'Licence plate (wide)', w: 2048, h: 434, draw(o) { // European size, 520 × 110 mm

@@ -319,3 +319,10 @@ input[type=range]{accent-color:var(--accent);width:100%}
 #plateBox[hidden],#myPlateBox[hidden],#plSpots[hidden]{display:none}
 .platepv{display:block;width:100%;max-width:260px;aspect-ratio:2/1;object-fit:contain;align-self:center;filter:drop-shadow(0 2px 6px rgba(0,0,0,.25))}
 #plText{font-family:var(--mono,monospace);letter-spacing:.08em;text-transform:uppercase}
+
+.libtools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.libtools input[type=search]{flex:1 1 220px;min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:.45em .7em;font:inherit}
+.libcard{position:relative}
+.libcard .selbox{position:absolute;top:8px;left:8px;width:22px;height:22px;z-index:2;accent-color:var(--accent)}
+.libcard.sel{outline:3px solid var(--accent);outline-offset:-3px}
+.libcard.dupe .dim::after{content:" · looks like another logo";color:var(--accent)}

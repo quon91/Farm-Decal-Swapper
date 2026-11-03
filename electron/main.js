@@ -149,6 +149,7 @@ ipcMain.handle('scanEdited', async (_e, { dir, tag }) => {
   return out;
 });
 ipcMain.handle('writeNewZip', async (_e, { dir, name, data, overwrite, backup }) => {
+  await fsp.mkdir(dir, { recursive: true });
   const p = safeJoin(dir, name); if (fs.existsSync(p) && !overwrite) return { error: 'exists', path: p };
   if (fs.existsSync(p) && backup) { await fsp.mkdir(BACKUPS(), { recursive: true }); await fsp.copyFile(p, path.join(BACKUPS(), `${path.basename(p, '.zip')}_${stamp()}.zip`)); }
   const tmp = p + '.saving'; await fsp.writeFile(tmp, Buffer.from(data)); await fsp.rename(tmp, p); return { saved: true, path: p };
