@@ -8,6 +8,7 @@ Farm Decal Swapper includes or is derived from the following open-source work.
 | [I3DShapesTool](https://github.com/Donkie/I3DShapesTool) by Daniel Hultgren | The `.i3d.shapes` cipher key table and algorithm in `src/tables.js` / `src/core.js` were ported from its C# source | MIT |
 | [bcdec](https://github.com/iOrange/bcdec) by Sergii Kudlai | BC7 partition tables in `src/tables.js`; the BC7 decoder in `src/core.js` follows its structure | MIT / Unlicense (dual) |
 | [three.js](https://threejs.org/) r147 (`src/vendor/three.min.js`) | The 3D view for placing stickers | MIT |
+| [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) 0.5.23 (`src/vendor/three-mesh-bvh.min.js`) | Fast clicking and dragging on big 3D models | MIT |
 | [yauzl](https://github.com/thejoshwolfe/yauzl) | Reading mod icons and titles from zips in the mods folder | MIT |
 | [I3D Blender exporter](https://github.com/StjerneIdioten/I3D-Blender-Addon) | Reference for the i3d rotation order (no code copied) | — |
 | [Electron](https://www.electronjs.org/) | Desktop app shell | MIT |

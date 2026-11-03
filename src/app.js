@@ -871,7 +871,7 @@ function initPlace() {
   if (!S.viewer) {
     if (!window.THREE || !window.FDSViewer) { $('viewStatus').hidden = false; $('viewStatus').textContent = 'The 3D view couldn’t start (3D library missing).'; return; }
     try { S.viewer = FDSViewer($('view3d')); } catch (e) { $('viewStatus').hidden = false; $('viewStatus').textContent = 'The 3D view couldn’t start on this computer: ' + e.message; return; }
-    S.viewer.onPick = placeAt; S.viewer.onSelect = id => selectSticker(id); S.viewer.onDrag = dragSticker;
+    S.viewer.onPick = placeAt; S.viewer.onSelect = id => selectSticker(id); S.viewer.onDrag = dragSticker; S.viewer.onDragEnd = dragEnd;
     S.viewer.setBackground(getComputedStyle(document.documentElement).getPropertyValue('--check-a').trim() || '#d9ded3');
   }
   const sel = $('placeModel'); sel.innerHTML = '';
@@ -936,7 +936,14 @@ function welded(i3d, nodeId) {
   } catch (e) { console.warn(e); }
   weldCache.set(key, m); return m;
 }
-function stickerGeom(i3d, point, normal, rot, width, aspect, nodeId, face, wrap = true) {
+const geomCache = new Map();
+function stickerGeom(i3d, point, normal, rot, width, aspect, nodeId, face, wrap = true) { // cached, so only a sticker that moved is wrapped again
+  const key = [S.mod.name, i3d, nodeId, face, rot, width, aspect, wrap, ...point, ...normal].join('|');
+  if (geomCache.has(key)) return geomCache.get(key);
+  if (geomCache.size > 400) geomCache.clear();
+  const g = stickerGeomNow(i3d, point, normal, rot, width, aspect, nodeId, face, wrap); g.key = key; geomCache.set(key, g); return g;
+}
+function stickerGeomNow(i3d, point, normal, rot, width, aspect, nodeId, face, wrap) {
   const m = welded(i3d, nodeId), f = frameOf(normal, rot);
   if (m) { try { const g = Core.wrapDecal(m, { point, n: f.n, r: f.r, u: f.u, w: width, h: width / aspect, face: face == null ? -1 : face, maxBendCos: wrap ? -0.2 : 0.77 }); if (g) return { mesh: g }; } catch (e) { console.warn(e); } }
   return { corners: cornersOf(point, rot, width, aspect, normal) };
@@ -956,12 +963,13 @@ function defaultWidth() { // about a fourteenth of the model's size: ~0.6 m on a
 function moveTo(st, hit) { Object.assign(st, { point: hit.point, normal: hit.normal, nodeId: hit.nodeId, name: hit.name, face: hit.face, parentM: S.viewer.worldMatrixOf(hit.nodeId) }); }
 let dragTimer = 0;
 function dragSticker(id, hit) {
-  const pl = S.mod.plates.find(x => x.id === id); if (pl) { S.mod.place.sel = id; if (!pl.mount) moveTo(pl, hit); drawStickers(); return; } // plates on the game's spots stay put
+  const pl = S.mod.plates.find(x => x.id === id); if (pl) { const first = S.mod.place.sel !== id; S.mod.place.sel = id; if (!pl.mount) moveTo(pl, hit); drawStickers(!first); return; } // plates on the game's spots stay put
   const st = S.mod.stickers.find(x => x.id === id); if (!st) return;
-  if (S.mod.place.sel !== id) S.mod.place.sel = id;
-  moveTo(st, hit); drawStickers();
-  clearTimeout(dragTimer); dragTimer = setTimeout(() => { updateTwin(st); drawStickers(); }, 60); // the far-side copy follows once the drag settles
+  const first = S.mod.place.sel !== id; if (first) S.mod.place.sel = id;
+  moveTo(st, hit); drawStickers(!first); // while dragging, only the 3D view is redrawn
+  clearTimeout(dragTimer); dragTimer = setTimeout(() => { updateTwin(st); drawStickers(); }, 250); // the far-side copy follows once the drag settles
 }
+function dragEnd(id) { clearTimeout(dragTimer); const st = S.mod.stickers.find(x => x.id === id); if (st) updateTwin(st); drawStickers(); }
 /* ---- licence plates: the game's plate on a new mount, or your own plate (your design and letters, part of the model) ---- */
 const PLATE_SIZE = { SQUARISH: [0.305, 0.152], ELONGATED: [0.52, 0.11] };
 let placeMode = 'logo', plateStyle = store.get('plateStyle') === 'game' ? 'game' : 'mine';
@@ -1086,7 +1094,14 @@ function placeAt(hit) {
   toast(`Sticker placed on “${hit.name || 'part'}”. Drag it to move it, or adjust it on the right.`);
 }
 /* ---- shop choice for placed logos (vehicles: a free designN configuration switches sticker copies on and off) ---- */
-function vehiclesUsing(i3d) {
+const vehCache = new Map();
+function vehiclesUsing(i3d) { // cached: reading every XML in a big pack on each redraw made dragging slow
+  const M = S.mod, sig = M.name + '|' + i3d + '|' + [...M.textEdits].map(([k, v]) => k + ':' + v.length).join(',') + '|' + (M.storeNames ? M.storeNames.size : 0);
+  if (vehCache.has(sig)) return vehCache.get(sig).map(v => Object.assign({}, v));
+  if (vehCache.size > 200) vehCache.clear();
+  const out = readVehiclesUsing(i3d); vehCache.set(sig, out); return out.map(v => Object.assign({}, v));
+}
+function readVehiclesUsing(i3d) {
   const out = [];
   for (const k of S.mod.files.keys()) { if (!/\.xml$/i.test(k) || /moddesc\.xml$/i.test(k)) continue; let t; try { t = xmlText(k); } catch (e) { continue; }
     const v = Core.vehicleI3d(t); if (v && v.toLowerCase() === i3d.toLowerCase()) out.push({ xml: k, slot: Core.freeDesignSlot(t), name: (Core.storeName(t, texts()) || {}).text || baseName(k) }); }
@@ -1123,17 +1138,21 @@ $('slTitle').addEventListener('input', e => { shopLogoState(S.mod.place.i3d).tit
 $('slNone').addEventListener('change', e => { shopLogoState(S.mod.place.i3d).none = e.target.checked; drawShopLogo(); });
 $('slDef').addEventListener('change', e => { shopLogoState(S.mod.place.i3d).def = e.target.value; });
 function selectSticker(id) { S.mod.place.sel = id; drawStickers(); }
-function drawStickers() {
+const canvasNo = new WeakMap(); let canvasN = 0;
+const canvasKey = c => { if (!canvasNo.has(c)) canvasNo.set(c, ++canvasN); return canvasNo.get(c); };
+function drawStickers(quick) { // quick: only the 3D view (used while dragging)
   const M = S.mod; if (!M || !M.place || !S.viewer) return;
   const here = M.stickers.filter(st => st.i3d === M.place.i3d), list = [];
+  const item = (id, g, logo, selected) => ({ id, ...g, logo, selected, key: g.key ? `${id}|${g.key}|${canvasKey(logo)}|${selected ? 1 : 0}` : null });
   for (const st of here) {
-    const l = logoById(st.logo); if (!l) continue; const asp = logoAspect(st.logo);
-    list.push({ id: st.id, ...stickerGeom(st.i3d, st.point, st.normal, st.rot, st.width, asp, st.nodeId, st.face, st.wrap !== false), logo: l.canvas, selected: st.id === M.place.sel });
-    if (st.twin) list.push({ id: st.id, ...stickerGeom(st.i3d, st.twin.point, st.twin.normal, -st.rot, st.width, asp, st.twin.nodeId, st.twin.face, st.wrap !== false), logo: l.canvas, selected: st.id === M.place.sel });
+    const l = logoById(st.logo); if (!l) continue; const asp = logoAspect(st.logo), sel = st.id === M.place.sel;
+    list.push(item(st.id, stickerGeom(st.i3d, st.point, st.normal, st.rot, st.width, asp, st.nodeId, st.face, st.wrap !== false), l.canvas, sel));
+    if (st.twin) list.push(item(st.id, stickerGeom(st.i3d, st.twin.point, st.twin.normal, -st.rot, st.width, asp, st.twin.nodeId, st.twin.face, st.wrap !== false), l.canvas, sel));
   }
   const plateLook = p => (p.style === 'mine' && plateArtNow(p.i3d, p.type)) || plateCanvas(p.type);
-  for (const p of M.plates.filter(x => x.i3d === M.place.i3d)) list.push({ id: p.id, corners: plateQuad(p).world, logo: plateLook(p), selected: p.id === M.place.sel });
+  for (const p of M.plates.filter(x => x.i3d === M.place.i3d)) { const corners = plateQuad(p).world; list.push(item(p.id, { corners, key: corners.flat().join(',') }, plateLook(p), p.id === M.place.sel)); }
   S.viewer.setStickers(list);
+  if (quick) return;
   const pl = selectedPlate(); $('plateEdit').hidden = !pl;
   if (pl) { const mine = pl.style === 'mine'; $('plPos').value = pl.pos; $('plType').value = pl.type; $('plRot').value = pl.rot; $('plRotV').textContent = pl.rot + '°';
     $('plTitle').textContent = mine ? 'Your plate' : 'Game licence plate'; $('fPlPos').hidden = mine; $('fPlRot').hidden = !!pl.mount;

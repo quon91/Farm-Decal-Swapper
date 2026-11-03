@@ -12,8 +12,9 @@ function FDSViewer(canvas) {
   const sun = new THREE.DirectionalLight(0xffffff, 0.75); camera.add(sun); sun.position.set(0.4, 0.8, 0.3); scene.add(camera);
   const root = new THREE.Group(); scene.add(root);
   const stickerGroup = new THREE.Group(); scene.add(stickerGroup);
-  let meshes = [], disposed = false, needs = true, onPick = null, onSelect = null, onDrag = null, bg = '#d9ded3', modelSize = 0, modelCenter = [0, 0, 0];
-  const ray = new THREE.Raycaster();
+  let meshes = [], disposed = false, needs = true, onPick = null, onSelect = null, onDrag = null, onDragEnd = null, bg = '#d9ded3', modelSize = 0, modelCenter = [0, 0, 0];
+  const ray = new THREE.Raycaster(); ray.firstHitOnly = true; // nearest hit only: with the BVH below this is fast on big models
+  const BVH = window.MeshBVHLib || null;
 
   /* ---------- orbit camera ---------- */
   const orbit = { target: new THREE.Vector3(), dist: 10, yaw: Math.PI * 0.75, pitch: 0.35 };
@@ -22,7 +23,7 @@ function FDSViewer(canvas) {
     camera.position.set(orbit.target.x + orbit.dist * cp * Math.sin(orbit.yaw), orbit.target.y + orbit.dist * Math.sin(orbit.pitch), orbit.target.z + orbit.dist * cp * Math.cos(orbit.yaw));
     camera.lookAt(orbit.target); needs = true;
   }
-  let drag = null;
+  let drag = null, hoverEv = null, hoverQueued = false;
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   canvas.addEventListener('pointerdown', e => {
     drag = { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, pan: e.button === 2 || e.shiftKey, moved: false, sticker: null };
@@ -30,13 +31,15 @@ function FDSViewer(canvas) {
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener('pointermove', e => {
-    if (!drag) { canvas.style.cursor = stickerAt(e) ? 'grab' : ''; return; }
+    if (!drag) { hoverEv = e; if (!hoverQueued) { hoverQueued = true; requestAnimationFrame(() => { hoverQueued = false; if (!drag && hoverEv) canvas.style.cursor = stickerAt(hoverEv) ? 'grab' : ''; }); } return; }
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
     if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
     if (drag.sticker) {
       if (!drag.moved) return; canvas.style.cursor = 'grabbing';
-      ray.setFromCamera(ndc(e), camera); const hit = ray.intersectObjects(meshes, false)[0];
-      if (hit && onDrag) onDrag(drag.sticker, describeHit(hit, ray.ray.direction));
+      // one move per frame: the mouse can send far more events than the screen shows
+      drag.last = e; if (!drag.queued) { drag.queued = true; const d = drag; requestAnimationFrame(() => { d.queued = false; if (drag !== d || !d.last) return;
+        ray.setFromCamera(ndc(d.last), camera); const hit = ray.intersectObjects(meshes, false)[0];
+        if (hit && onDrag) { d.dragged = true; onDrag(d.sticker, describeHit(hit, ray.ray.direction)); } }); }
       return;
     }
     if (drag.pan) {
@@ -45,7 +48,7 @@ function FDSViewer(canvas) {
     } else { orbit.yaw -= dx * 0.008; orbit.pitch = Math.max(-1.5, Math.min(1.5, orbit.pitch + dy * 0.008)); }
     placeCamera();
   });
-  canvas.addEventListener('pointerup', e => { const d = drag; drag = null; canvas.style.cursor = ''; if (d && !d.moved && e.button === 0) click(e); });
+  canvas.addEventListener('pointerup', e => { const d = drag; drag = null; canvas.style.cursor = ''; if (d && !d.moved && e.button === 0) click(e); if (d && d.sticker && d.dragged && onDragEnd) onDragEnd(d.sticker); });
   canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.2, Math.min(500, orbit.dist * Math.exp(e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
 
   function ndc(e) { const r = canvas.getBoundingClientRect(); return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
@@ -63,11 +66,25 @@ function FDSViewer(canvas) {
   function describeHit(hit, dir) {
     const nm = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld);
     const n = hit.face.normal.clone().applyMatrix3(nm).normalize(); if (n.dot(dir) > 0) n.negate();
-    return { point: hit.point.toArray(), normal: n.toArray(), nodeId: hit.object.userData.nodeId, name: hit.object.userData.name, face: hit.faceIndex == null ? -1 : hit.faceIndex };
+    return { point: hit.point.toArray(), normal: n.toArray(), nodeId: hit.object.userData.nodeId, name: hit.object.userData.name, face: origFace(hit) };
+  }
+  /** The triangle's number in the model file. The search tree reorders the triangles it is built on, so look the hit's corners up in the original order. */
+  function origFace(hit) {
+    const g = hit.object.geometry, o = g.userData.origIndex; if (!o || !hit.face) return hit.faceIndex == null ? -1 : hit.faceIndex;
+    if (!g.userData.firstOf) { // faces listed by their first corner
+      const nv = g.attributes.position.count, start = new Int32Array(nv + 1), list = new Int32Array(o.length / 3);
+      for (let i = 0; i < o.length; i += 3) start[o[i] + 1]++;
+      for (let v = 0; v < nv; v++) start[v + 1] += start[v];
+      const fill = start.slice(0, nv); for (let f = 0; f < list.length; f++) list[fill[o[f * 3]]++] = f;
+      g.userData.firstOf = { start, list };
+    }
+    const { start, list } = g.userData.firstOf, { a, b, c } = hit.face;
+    for (let k = start[a]; k < start[a + 1]; k++) { const f = list[k]; if (o[f * 3 + 1] === b && o[f * 3 + 2] === c) return f; }
+    return -1;
   }
   /** Cast a ray at the model (for mirrored copies and nudging). */
   function castAt(point, dir, maxDist) {
-    const r = new THREE.Raycaster(new THREE.Vector3(...point), new THREE.Vector3(...dir).normalize(), 0, maxDist || 1);
+    const r = new THREE.Raycaster(new THREE.Vector3(...point), new THREE.Vector3(...dir).normalize(), 0, maxDist || 1); r.firstHitOnly = true;
     const hit = r.intersectObjects(meshes, false)[0]; return hit ? describeHit(hit, r.ray.direction) : null;
   }
 
@@ -128,6 +145,12 @@ function FDSViewer(canvas) {
     root.updateMatrixWorld(true);
     meshes = meshes.filter(m => { let o = m; while (o) { if (!o.visible) return false; o = o.parent; } return true; });
     fit(); needs = true;
+    if (BVH) { // a search tree per part, so clicks and drags don't test every triangle; built in small steps after the first frame
+      const todo = [...new Set(meshes.map(m => m.geometry))];
+      for (const m of meshes) m.raycast = BVH.acceleratedRaycast;
+      (async () => { let t = performance.now(); for (const g of todo) { if (disposed || !g.index) continue; try { const keep = g.index.array.slice(); g.boundsTree = new BVH.MeshBVH(g); g.userData.origIndex = keep; } catch (e) { console.warn(e); }
+        if (performance.now() - t > 30) { await new Promise(r => setTimeout(r, 0)); t = performance.now(); } } })();
+    }
     // textures load after the first frame
     for (const j of texJobs) {
       if (disposed) return; const u8 = opts.files.get(j.path); if (!u8) continue;
@@ -144,11 +167,17 @@ function FDSViewer(canvas) {
   }
 
   /* ---------- stickers ---------- */
-  const texCache = new WeakMap();
-  function setStickers(list) { // [{id, corners:[[x,y,z]x4], logo:canvas, selected}]
-    stickerGroup.clear();
+  const texCache = new WeakMap(); let shown = new Map(); // key -> the objects drawn for it
+  const dispose = o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); };
+  function setStickers(list) { // [{id, key?, corners:[[x,y,z]x4] | mesh, logo:canvas, selected}]; items with an unchanged key are kept as they are
+    const next = new Map(), keep = new Set();
+    for (const s of list) if (s.key != null && shown.has(s.key) && !next.has(s.key)) { next.set(s.key, shown.get(s.key)); keep.add(s.key); }
+    for (const [k, objs] of shown) if (!keep.has(k)) for (const o of objs) { stickerGroup.remove(o); dispose(o); }
+    shown = next;
     for (const s of list) {
       if (!s.corners && !s.mesh) continue;
+      if (s.key != null && keep.has(s.key)) { keep.delete(s.key); continue; }
+      const before = stickerGroup.children.length;
       const g = new THREE.BufferGeometry();
       if (s.mesh) { // wrapped onto the surface
         g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(s.mesh.verts.flat()), 3));
@@ -171,6 +200,8 @@ function FDSViewer(canvas) {
         }
         e.renderOrder = 3; stickerGroup.add(e);
       }
+      const objs = stickerGroup.children.slice(before), k = s.key != null ? s.key : Symbol();
+      if (shown.has(k)) shown.get(k).push(...objs); else shown.set(k, objs);
     }
     needs = true;
   }
@@ -194,7 +225,7 @@ function FDSViewer(canvas) {
   placeCamera();
   return {
     load, setStickers, castAt, worldMatrixOf, meshData, focus, fit,
-    set onPick(f) { onPick = f; }, set onSelect(f) { onSelect = f; }, set onDrag(f) { onDrag = f; },
+    set onPick(f) { onPick = f; }, set onSelect(f) { onSelect = f; }, set onDrag(f) { onDrag = f; }, set onDragEnd(f) { onDragEnd = f; },
     get modelSize() { return modelSize; }, get modelCenter() { return modelCenter; },
     setBackground(c) { bg = c; needs = true; },
     snapshot() { renderer.render(scene, camera); return canvas.toDataURL('image/png'); },
