@@ -682,7 +682,7 @@ function setStoreBrand(src, brand) {
   return src.slice(0, sd.index) + block + src.slice(sd.index + sd[0].length);
 }
 /** The brand and year a shop item already has (storeData <brand>, <specs><year>), or ''. */
-function storeBrandOf(src) { const sd = (src.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0]; return ((sd.match(/<brand>\s*([^<]*?)\s*<\/brand>/) || [])[1] || '').trim(); }
+function storeBrandOf(src) { const sd = (src.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0], b = ((sd.match(/<brand>\s*([^<]*?)\s*<\/brand>/) || [])[1] || '').trim(); return /^none$/i.test(b) ? '' : b; } // NONE means no brand
 function storeYearOf(src) { const sd = (src.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0]; return ((sd.match(/<specs>[\s\S]*?<year>\s*([^<]*?)\s*<\/year>/) || [])[1] || '').trim(); }
 /** Give a shop item a year (storeData <specs><year>), adding <specs> when it has none. */
 function setStoreYear(src, year) {
@@ -694,6 +694,158 @@ function setStoreYear(src, year) {
   else if (/<specs\s*\/>/.test(block)) block = block.replace(/<specs\s*\/>/, `<specs>${nl}${ind}    <year>${escText(year)}</year>${nl}${ind}</specs>`);
   else block = block.replace(/(\r?\n?[ \t]*)<\/storeData>$/, `${nl}${ind}<specs>${nl}${ind}    <year>${escText(year)}</year>${nl}${ind}</specs>$1</storeData>`);
   return src.slice(0, sd.index) + block + src.slice(sd.index + sd[0].length);
+}
+/** Shop tile (storeData <category>) and build-menu place (storeData <brush>) of a shop item. */
+function storeCategoryOf(src) { const sd = (src.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0].replace(/<brush>[\s\S]*?<\/brush>/, ''); return ((sd.match(/<category>\s*([^<]*?)\s*<\/category>/) || [])[1] || '').trim(); }
+function brushOf(src) { const b = ((src.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0].match(/<brush>[\s\S]*?<\/brush>/) || [''])[0]; if (!b) return null;
+  const g = t => ((b.match(new RegExp('<' + t + '>\\s*([^<]*?)\\s*</' + t + '>')) || [])[1] || '').trim(); return { type: g('type'), category: g('category'), tab: g('tab') }; }
+const isPlaceableXml = src => /<placeable[\s>]/.test(src);
+function setStoreCategory(src, name) {
+  const sd = src.match(/<storeData>[\s\S]*?<\/storeData>/); if (!sd) return src;
+  const nl = src.includes('\r\n') ? '\r\n' : '\n', ind = ((sd[0].match(/\n([ \t]*)<name>/) || [])[1]) || '        ';
+  const brush = (sd[0].match(/<brush>[\s\S]*?<\/brush>/) || [''])[0], body = sd[0].replace(brush, '\u0000BRUSH\u0000');
+  let block = /<category>[\s\S]*?<\/category>/.test(body) ? body.replace(/<category>[\s\S]*?<\/category>/, `<category>${escText(name)}</category>`)
+    : body.replace(/(<\/name>)/, `$1${nl}${ind}<category>${escText(name)}</category>`);
+  if (!block.includes('<category>')) block = block.replace('<storeData>', `<storeData>${nl}${ind}<category>${escText(name)}</category>`);
+  block = block.replace('\u0000BRUSH\u0000', brush);
+  return src.slice(0, sd.index) + block + src.slice(sd.index + sd[0].length);
+}
+/** Put a placeable on a build-menu category and tab (keeps the brush type it has, else "placeable"). */
+function setBrush(src, category, tab) {
+  const sd = src.match(/<storeData>[\s\S]*?<\/storeData>/); if (!sd) return src;
+  const nl = src.includes('\r\n') ? '\r\n' : '\n', ind = ((sd[0].match(/\n([ \t]*)<name>/) || [])[1]) || '        ', cur = brushOf(src);
+  const xml = `<brush>${nl}${ind}    <type>${escText((cur && cur.type) || 'placeable')}</type>${nl}${ind}    <category>${escText(category)}</category>${nl}${ind}    <tab>${escText(tab)}</tab>${nl}${ind}</brush>`;
+  const block = cur ? sd[0].replace(/<brush>[\s\S]*?<\/brush>/, xml) : sd[0].replace(/(\r?\n?[ \t]*)<\/storeData>$/, `${nl}${ind}${xml}$1</storeData>`);
+  return src.slice(0, sd.index) + block + src.slice(sd.index + sd[0].length);
+}
+/**
+ * Your own section in the shop (tiles) and in the build menu (a category with tabs), as a small script mod.
+ * cfg: { key: 'DBF', title, tiles: [{ name, title, image }], tabs: [{ name, title }], icon, descVersion, author }
+ * Items join with <storeData><category>TILE</category> and <brush><type>placeable</type><category>KEY_farms</category><tab>tab</tab></brush>.
+ */
+function categoriesLua(cfg) {
+  const q = s => JSON.stringify(String(s)), L = [];
+  L.push(`-- ${cfg.title}: a section in the shop and a category in the build menu. Made with Farm Decal Swapper.`);
+  L.push(`-- Shop items join a tile with <category>NAME</category> in their storeData; placeables join a build-menu tab with`);
+  L.push(`-- <brush><type>placeable</type><category>${cfg.key.toLowerCase()}_farms</category><tab>name</tab></brush>. Unknown tabs go to the last tab.`);
+  L.push(`local MOD_DIR = g_currentModDirectory`);
+  L.push(`local SHOP_TYPE, SHOP_TITLE = ${q(cfg.key.toUpperCase() + '_SHOP')}, ${q(cfg.title)}`);
+  L.push(`local TILES = {`); for (const t of cfg.tiles) L.push(`    { name = ${q(t.name)}, title = ${q(t.title)}, image = ${q(t.image)} },`); L.push(`}`);
+  L.push(`local CATEGORY, CATEGORY_TITLE, ICON = ${q(cfg.key.toUpperCase() + '_FARMS')}, ${q(cfg.title)}, ${q(cfg.icon)}`);
+  L.push(`local TABS = {`); for (const t of cfg.tabs) L.push(`    { name = ${q(t.name)}, title = ${q(t.title)} },`); L.push(`}`);
+  L.push(String.raw`local LOG = "[` + cfg.key + String.raw`Categories] "
+local tabs = nil              -- tab tables by name, once made
+
+local function can(obj, fn)
+    if obj ~= nil and type(obj[fn]) == "function" then return true end
+    Logging.warning(LOG .. "game function %s not found, skipped", tostring(fn))
+    return false
+end
+local function uvs()
+    if GuiUtils ~= nil and GuiUtils.getUVs ~= nil then return GuiUtils.getUVs("0 0 1 1") end
+    return { 0, 0, 0, 1, 1, 0, 1, 1 }
+end
+
+local function make(sm)
+    if sm == nil then return end
+    -- the shop: a section with tiles
+    if sm.categoryTypesByName ~= nil and sm.categoryTypesByName[SHOP_TYPE] == nil and can(sm, "addCategoryType") then
+        sm:addCategoryType(SHOP_TYPE, SHOP_TITLE, nil)
+    end
+    if can(sm, "getCategoryByName") and can(sm, "addCategory") then
+        for _, t in ipairs(TILES) do
+            if sm:getCategoryByName(t.name) == nil then sm:addCategory(t.name, t.title, t.image, SHOP_TYPE, MOD_DIR) end
+        end
+    end
+    -- the build menu: a category with tabs
+    if tabs ~= nil or not (can(sm, "getConstructionCategoryByName") and can(sm, "addConstructionCategory") and can(sm, "addConstructionTab")) then return end
+    local cat = sm:getConstructionCategoryByName(CATEGORY)
+    if cat == nil then
+        sm:addConstructionCategory(CATEGORY, CATEGORY_TITLE, MOD_DIR .. ICON, uvs(), "", nil)
+        cat = sm:getConstructionCategoryByName(CATEGORY)
+    end
+    if cat == nil then return end
+    tabs = {}
+    for _, t in ipairs(TABS) do
+        local found = nil
+        for _, ct in ipairs(cat.tabs) do if ct.name == t.name then found = ct end end
+        if found == nil then
+            sm:addConstructionTab(CATEGORY, t.name, t.title, MOD_DIR .. ICON, uvs(), "", nil)
+            found = cat.tabs[#cat.tabs]
+        end
+        tabs[t.name] = found
+    end
+    Logging.info(LOG .. "shop section and build menu category '%s' ready", CATEGORY_TITLE)
+end
+
+local function safe(fn, ...)
+    local ok, err = pcall(fn, ...)
+    if not ok then Logging.error(LOG .. "%s", tostring(err)) end
+end
+
+if StoreManager ~= nil and not StoreManager["` + cfg.key + String.raw`CategoriesHooked"] then
+    StoreManager["` + cfg.key + String.raw`CategoriesHooked"] = true
+    if type(StoreManager.loadItemsFromXML) == "function" then      -- before the first shop item loads
+        local base = StoreManager.loadItemsFromXML
+        StoreManager.loadItemsFromXML = function(self, ...) safe(make, self) return base(self, ...) end
+    end
+    if type(StoreManager.loadMapData) == "function" then           -- and once more after the map's own lists
+        local base = StoreManager.loadMapData
+        StoreManager.loadMapData = function(self, ...) local r = base(self, ...) safe(make, self) return r end
+    end
+    if type(StoreManager.getConstructionTabByName) == "function" then  -- our tabs by name; an unknown one goes to the last tab
+        local base = StoreManager.getConstructionTabByName
+        StoreManager.getConstructionTabByName = function(self, name, categoryName, ...)
+            if tabs ~= nil and categoryName ~= nil and string.upper(categoryName) == CATEGORY then
+                return (name ~= nil and tabs[string.upper(name)]) or tabs[TABS[#TABS].name]
+            end
+            return base(self, name, categoryName, ...)
+        end
+    end
+end
+
+-- the build menu shows only the tabs that have something in them
+if ConstructionScreen ~= nil and type(ConstructionScreen.rebuildData) == "function" and not ConstructionScreen["` + cfg.key + String.raw`CategoriesHooked"] then
+    ConstructionScreen["` + cfg.key + String.raw`CategoriesHooked"] = true
+    local base = ConstructionScreen.rebuildData
+    ConstructionScreen.rebuildData = function(self, ...)
+        safe(function()
+            local sm = g_storeManager
+            local cat = sm ~= nil and sm.getConstructionCategoryByName ~= nil and sm:getConstructionCategoryByName(CATEGORY) or nil
+            if cat == nil or tabs == nil then return end
+            local used, keep = {}, {}
+            for _, item in ipairs(sm:getItems()) do
+                if item.brush ~= nil and item.brush.category == cat and item.brush.tab ~= nil then used[item.brush.tab] = true end
+            end
+            for _, t in ipairs(TABS) do if used[tabs[t.name]] then table.insert(keep, tabs[t.name]) end end
+            if #keep == 0 then table.insert(keep, tabs[TABS[#TABS].name]) end
+            for i, tab in ipairs(keep) do tab.index = i end
+            cat.tabs = keep
+        end)
+        return base(self, ...)
+    end
+end
+`);
+  return L.join('\n');
+}
+function categoriesModDesc(cfg) {
+  return `<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<modDesc descVersion="${cfg.descVersion || 96}">
+    <author>${escText(cfg.author || cfg.title)}</author>
+    <version>1.0.0.0</version>
+    <title>
+        <en>${escText(cfg.title)} Categories</en>
+    </title>
+    <description>
+        <en>${escText(`Adds the ${cfg.title} section to the shop (${cfg.tiles.map(t => t.title).join(', ')}) and to the build menu (${cfg.tabs.map(t => t.title).join(', ')}). Made with Farm Decal Swapper.`)}</en>
+    </description>
+    <iconFilename>icon.dds</iconFilename>
+    <multiplayer supported="true"/>
+    <extraSourceFiles>
+        <sourceFile filename="scripts/${cfg.key}Categories.lua"/>
+    </extraSourceFiles>
+</modDesc>
+`;
 }
 /** Make a mod depend on another (so the game loads that one first). */
 function addDependency(modDesc, name) {
@@ -968,7 +1120,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { normPath, storeBrandOf, storeYearOf, setStoreYear, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { normPath, categoriesLua, categoriesModDesc, storeCategoryOf, brushOf, isPlaceableXml, setStoreCategory, setBrush, storeBrandOf, storeYearOf, setStoreYear, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

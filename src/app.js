@@ -281,7 +281,7 @@ function modBadges(m) {
   else if (m.edited) out.push(['edited', 'Has your logos']);
   if (mine) { const ob = originalOf(base).toLowerCase(); if ((S.originals || []).some(o => { const n = o.toLowerCase().replace(/\.zip$/, ''); return n === ob || n.startsWith(ob + '_20'); })) out.push(['orig', 'Original saved']); }
   if (!mine && S.mods.some(o => o !== m && o.name.toLowerCase() === copyName(m.name).toLowerCase())) out.push(['hascopy', 'Copy exists']);
-  if (S.mod && S.mod.path && S.mod.path === m.path) { const n = changeCount(); out.push(n ? ['open', `Open · ${n} unsaved`] : ['open', 'Open']); }
+  if (S.mod && S.mod.path && S.mod.path === m.path) { const n = unsaved() ? changeCount() : 0; out.push(n ? ['open', `Open · ${n} unsaved`] : ['open', 'Open']); }
   if (!mine && !m.edited && m.kind !== 'folder') out.push(['plain', 'Not edited']);
   return out;
 }
@@ -356,7 +356,7 @@ function noteRecent(m) { // the mods screen lists these first
   r = [{ path: m.path, name: m.name, t: Date.now() }].concat(r.filter(x => x.path !== m.path)).slice(0, 8); store.set('recentMods', JSON.stringify(r));
 }
 async function openModFromPath(m) {
-  if (S.mod && changeCount() && !confirmDiscard()) return;
+  if (unsaved() && !confirmDiscard()) return;
   noteRecent(m);
   setView('mods'); status('Opening ' + m.name + '…', 'busy'); await tick();
   try {
@@ -366,7 +366,7 @@ async function openModFromPath(m) {
 }
 async function openZipFile(file, path) {
   if (!/\.zip$/i.test(file.name)) { status('That isn’t a .zip file. FS25 mods are zip archives.', 'err'); return; }
-  if (S.mod && changeCount() && !confirmDiscard()) return;
+  if (unsaved() && !confirmDiscard()) return;
   setView('mods'); status('Opening ' + file.name + '…', 'busy'); await tick();
   let zip; try { zip = await JSZip.loadAsync(file); } catch (e) { status('The zip couldn’t be opened: ' + e.message, 'err'); return; }
   await loadMod(zip, file.name, path, 'zip');
@@ -399,7 +399,7 @@ async function loadMod(zip, name, path, kind) {
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
   if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null; weldCache = new Map(); partCache = new Map();
-  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), storeBrands: new Map(), storeYears: new Map(), shopLogos: new Map() };
+  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), storeBrands: new Map(), storeYears: new Map(), storeTiles: new Map(), storeTabs: new Map(), shopLogos: new Map() };
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);
@@ -407,8 +407,8 @@ async function loadMod(zip, name, path, kind) {
   $('cntOptions').textContent = analysis.groups.length || ''; $('cntTex').textContent = analysis.textures.length; $('cntFiles').textContent = entries.length;
   renderOpts(); $('saveCopy').checked = $('saveCopyDefault').checked; showCopyName(); setView('mod'); setTab(analysis.textures.some(isLikely) || !analysis.groups.length ? 'logos' : 'options'); updateChanges();
 }
-$('btnCloseMod').onclick = () => { if (changeCount() && !confirmDiscard()) return; if (S.viewer) { S.viewer.dispose(); S.viewer = null; } S.mod = null; $('navMod').hidden = true; setView('mods'); };
-window.addEventListener('beforeunload', e => { if (S.mod && changeCount() && !APP) { e.preventDefault(); e.returnValue = ''; } });
+$('btnCloseMod').onclick = () => { if (unsaved() && !confirmDiscard()) return; if (S.viewer) { S.viewer.dispose(); S.viewer = null; } S.mod = null; $('navMod').hidden = true; setView('mods'); };
+window.addEventListener('beforeunload', e => { if (unsaved() && !APP) { e.preventDefault(); e.returnValue = ''; } });
 
 /* ================= logo library ================= */
 function idb() { return new Promise((res) => { try { const r = indexedDB.open('farm-decal-swapper', 2); // v2 adds "pictures"; existing logos are kept
@@ -913,6 +913,8 @@ function renamePlan() { // what will change: Map(xml -> { sets: Map(tag -> Map(i
   // a brand or year only for items that have none
   for (const [xml, b] of M.storeBrands || []) { const v = b.trim().toUpperCase(); if (v && !Core.storeBrandOf(xmlText(xml))) at(xml).brand = v; }
   for (const [xml, y] of M.storeYears || []) { const v = String(y).trim(); if (/^\d{4}$/.test(v) && !Core.storeYearOf(xmlText(xml))) at(xml).year = v; }
+  for (const [xml, v] of M.storeTiles || []) if (v) at(xml).tile = v;
+  for (const [xml, v] of M.storeTabs || []) if (v) at(xml).tab = v;
   return out;
 }
 /* brands to offer: the game's own (with the game folder), the ones this mod uses, the generic one, and yours */
@@ -954,6 +956,15 @@ function renderOpts() {
         meta.appendChild(w); };
       field('Brand', curB, S.mod.storeBrands, { placeholder: 'none yet: add one', size: 18, list: 'brandNames' });
       field('Year', curY, S.mod.storeYears, { placeholder: 'none yet', inputMode: 'numeric', maxLength: 4, size: 6 });
+      // your own shop tile (vehicles) or build-menu tab (buildings)
+      if (APP) { const placeable = Core.isPlaceableXml(t), w = document.createElement('label'); w.className = 'metafield'; const sel = document.createElement('select');
+        if (placeable) { const b = Core.brushOf(t); w.append(document.createTextNode('Build menu ')); sel.add(new Option(b ? `Keep (${b.category}${b.tab ? ' → ' + b.tab : ''})` : 'Keep', ''));
+          for (const tb of catTabs()) sel.add(new Option(`${brandTitle()} → ${tb.title}`, tb.name)); sel.value = S.mod.storeTabs.get(s.xml) || '';
+          sel.onchange = () => { if (sel.value) S.mod.storeTabs.set(s.xml, sel.value); else S.mod.storeTabs.delete(s.xml); updateChanges(); }; }
+        else { const cur = Core.storeCategoryOf(t); w.append(document.createTextNode('Shop tile ')); sel.add(new Option(cur ? `Keep (${cur})` : 'Keep', ''));
+          for (const ti of catTiles()) sel.add(new Option(`${brandTitle()} → ${ti.title}`, ti.name)); sel.value = S.mod.storeTiles.get(s.xml) || '';
+          sel.onchange = () => { if (sel.value) S.mod.storeTiles.set(s.xml, sel.value); else S.mod.storeTiles.delete(s.xml); updateChanges(); }; }
+        w.appendChild(sel); meta.appendChild(w); }
       sec.appendChild(meta);
     }
     box.appendChild(sec);
@@ -1820,22 +1831,92 @@ function plan() {
   const pic = S.mod.shopPics ? [...S.mod.shopPics.keys()] : [];
   return { tex, grp, txt, stk, ren, pla, pic };
 }
-function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += (e.store ? 1 : 0) + (e.brand ? 1 : 0) + (e.year ? 1 : 0); for (const m of e.sets.values()) n += m.size; } return n; }
+function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += (e.store ? 1 : 0) + (e.brand ? 1 : 0) + (e.year ? 1 : 0) + (e.tile ? 1 : 0) + (e.tab ? 1 : 0); for (const m of e.sets.values()) n += m.size; } return n; }
+/** A fingerprint of everything you changed, so a mod you just saved doesn't count as unsaved. */
+function changeSig() {
+  const M = S.mod; if (!M) return '';
+  try { return JSON.stringify({ e: [...M.edits].map(([k, e]) => [k, e.mode, e.logo, e.color, e.regions.map(r => r.on)]), s: M.stickers.map(x => [x.id, x.logo, x.point, x.width, x.rot, x.mirror, x.wrap]),
+    p: M.plates.map(x => [x.id, x.point, x.style, x.pos, x.type, x.rot]), g: [...M.groups].map(([k, g]) => [k, g.on, g.logos, g.makeDefault]), t: [...M.textEdits].map(([k, v]) => [k, v.length]),
+    m: [M.storeNames, M.storeBrands, M.storeYears, M.storeTiles, M.storeTabs, M.renames, M.shopPics || new Map(), M.myPlates || new Map()].map(x => [...x.keys(), ...[...x.values()].map(v => typeof v === 'object' ? JSON.stringify(v && v.text !== undefined ? [v.text, v.design, v.gameOff] : v && v.width ? 'pic' : v) : v)]),
+    sl: [...M.shopLogos].map(([k, v]) => [k, v.on, v.logos, v.def, v.none, v.title]) }); } catch (e) { return String(Math.random()); }
+}
+const unsaved = () => !!(S.mod && changeCount() && changeSig() !== S.mod.savedSig);
 function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren) + p.pla.length + (p.pic || []).length; }
 function updateChanges() {
   if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames + p.pla.length + p.pic.length;
   const nSt = p.stk.reduce((a, st) => a + 1 + (st.twin ? 1 : 0), 0);
   $('cntStickers').textContent = nSt || '';
-  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> name${nNames === 1 ? '' : 's'}`); if (p.pla.length) parts.push(`<b>${p.pla.length}</b> plate${p.pla.length === 1 ? '' : 's'}`); if (p.pic.length) parts.push(`<b>${p.pic.length}</b> shop picture${p.pic.length === 1 ? '' : 's'}`);
+  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> shop setting${nNames === 1 ? '' : 's'}`); if (p.pla.length) parts.push(`<b>${p.pla.length}</b> plate${p.pla.length === 1 ? '' : 's'}`); if (p.pic.length) parts.push(`<b>${p.pic.length}</b> shop picture${p.pic.length === 1 ? '' : 's'}`);
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
 }
+/* ---- your own section in the shop (tiles) and build-menu category (tabs): a small script mod ---- */
+const CAT_DEF = { tiles: ['Trucks', 'Tractors', 'Trailers', 'Tools', 'Equipment', 'Misc'], tabs: ['Sheds', 'Storage', 'Animals', 'Production', 'Houses', 'Decor', 'Misc'] };
+const catModName = () => `FS25_${copyTag()}_Categories`;
+const catKey = () => copyTag().toUpperCase().replace(/[^A-Z0-9]/g, '') || 'MY';
+const catSlug = t => String(t).toUpperCase().replace(/&/g, 'AND').replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'MISC';
+function catCfg() {
+  let c = null; try { c = JSON.parse(store.get('catCfg') || 'null'); } catch (e) {}
+  if (!c) c = { tiles: CAT_DEF.tiles.map(t => ({ title: t, logo: '' })), tabs: CAT_DEF.tabs.map(t => ({ title: t })) };
+  return c;
+}
+const saveCat = c => store.set('catCfg', JSON.stringify(c));
+const catTiles = () => catCfg().tiles.filter(t => t.title.trim()).map(t => ({ name: catKey() + '_' + catSlug(t.title), title: t.title.trim(), logo: t.logo }));
+const catTabs = () => catCfg().tabs.filter(t => t.title.trim()).map(t => ({ name: catSlug(t.title), title: t.title.trim() }));
+function catTileImage(t, n = 256) { // a rounded tile in your colours: your logo on top, the tile's name underneath
+  const c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'), r = n * 0.12, pal = window.LogoMaker ? window.LogoMaker.PALETTES.delta : { bg: '#1f4d22', metal: '#e9b23a', ink: '#0f2c12' };
+  const gr = g.createLinearGradient(0, 0, 0, n); gr.addColorStop(0, pal.bg); gr.addColorStop(1, pal.ink); g.fillStyle = gr; g.beginPath(); g.roundRect(4, 4, n - 8, n - 8, r); g.fill();
+  g.strokeStyle = pal.metal; g.lineWidth = n * 0.02; g.stroke();
+  const l = logoById(t.logo) || logoById($('brandLogo').value) || S.lib[0];
+  if (l) { const k = Math.min(n * 0.78 / l.canvas.width, n * (t.logo ? 0.56 : 0.42) / l.canvas.height); g.imageSmoothingQuality = 'high'; g.drawImage(l.canvas, (n - l.canvas.width * k) / 2, n * 0.1, l.canvas.width * k, l.canvas.height * k); }
+  g.fillStyle = pal.metal; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; let fs = n * 0.2; g.font = `${fs}px "Bebas Neue", "Public Sans", sans-serif`;
+  while (g.measureText(t.title.toUpperCase()).width > n * 0.84 && fs > 10) { fs -= 2; g.font = `${fs}px "Bebas Neue", "Public Sans", sans-serif`; }
+  g.fillText(t.title.toUpperCase(), n / 2, n * 0.88); return c;
+}
+function catIconImage(n = 512) { // the build-menu icon: your logo as a white shape, like the game's own icons
+  const c = fitInto((logoById($('brandLogo').value) || S.lib[0] || { canvas: document.createElement('canvas') }).canvas, n, n, 0.04), g = c.getContext('2d');
+  g.globalCompositeOperation = 'source-in'; g.fillStyle = '#ffffff'; g.fillRect(0, 0, n, n); return c;
+}
+let catFontReady = null;
+const loadCatFont = () => catFontReady || (catFontReady = (async () => { try { if (window.LM_FONTS && window.LM_FONTS['Bebas Neue']) { const b64 = window.LM_FONTS['Bebas Neue'].split(',')[1], bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const f = new FontFace('Bebas Neue', u8.buffer); document.fonts.add(await f.load()); } } catch (e) {} })()); // from the bytes: the page's security rules block font links
+function catUI() {
+  $('catModName').textContent = catModName() + '.zip'; const c = catCfg();
+  const tiles = $('catTiles'); tiles.innerHTML = '';
+  c.tiles.forEach((t, i) => { const row = document.createElement('div'), cv = document.createElement('canvas'); row.className = 'catrow'; cv.width = cv.height = 80;
+    const inp = document.createElement('input'); inp.value = t.title; inp.setAttribute('aria-label', 'Tile name');
+    const sel = document.createElement('select'); sel.setAttribute('aria-label', 'Tile picture'); sel.add(new Option('Picture: my brand logo', '')); for (const l of S.lib) sel.add(new Option(l.name, l.id)); sel.value = S.lib.some(l => l.id === t.logo) ? t.logo : '';
+    const del = document.createElement('button'); del.type = 'button'; del.className = 'btn small'; del.textContent = 'Remove';
+    const draw = () => { const im = catTileImage({ title: inp.value || ' ', logo: sel.value }, 80); cv.getContext('2d').clearRect(0, 0, 80, 80); cv.getContext('2d').drawImage(im, 0, 0); };
+    inp.oninput = () => { c.tiles[i].title = inp.value; saveCat(c); draw(); }; sel.onchange = () => { c.tiles[i].logo = sel.value; saveCat(c); draw(); };
+    del.onclick = () => { c.tiles.splice(i, 1); saveCat(c); catUI(); };
+    row.append(cv, inp, sel, del); tiles.appendChild(row); loadCatFont().then(draw); });
+  const tabs = $('catTabs'); tabs.innerHTML = '';
+  c.tabs.forEach((t, i) => { const row = document.createElement('div'); row.className = 'catrow'; const inp = document.createElement('input'); inp.value = t.title; inp.setAttribute('aria-label', 'Tab name');
+    inp.oninput = () => { c.tabs[i].title = inp.value; saveCat(c); }; const del = document.createElement('button'); del.type = 'button'; del.className = 'btn small'; del.textContent = 'Remove';
+    del.onclick = () => { c.tabs.splice(i, 1); saveCat(c); catUI(); }; row.append(inp, del); tabs.appendChild(row); });
+  $('catInfo').textContent = 'Game scripts can’t be tested outside the game: check the shop and build menu once after the first save. Items you already placed keep working if you change tiles or tabs.';
+}
+$('catAddTile').onclick = () => { const c = catCfg(); c.tiles.push({ title: 'New tile', logo: '' }); saveCat(c); catUI(); };
+$('catAddTab').onclick = () => { const c = catCfg(); c.tabs.push({ title: 'New tab' }); saveCat(c); catUI(); };
+async function writeCatMod(descVersion) {
+  await loadCatFont(); const tiles = catTiles(), tabs = catTabs(); if (!tiles.length || !tabs.length) throw new Error('add at least one tile and one tab');
+  const cfg = { key: catKey(), title: brandTitle(), descVersion, author: brandTitle(), icon: 'icons/category.dds', tiles: tiles.map(t => ({ name: t.name, title: t.title, image: `icons/${t.name.toLowerCase()}.dds` })), tabs };
+  const z = new JSZip(), dds = (c, mode) => Core.encodeDDS(c.getContext('2d').getImageData(0, 0, c.width, c.height).data, c.width, c.height, mode || 'lossless');
+  z.file('modDesc.xml', Core.categoriesModDesc(cfg)); z.file(`scripts/${cfg.key}Categories.lua`, Core.categoriesLua(cfg));
+  for (const t of tiles) z.file(`icons/${t.name.toLowerCase()}.dds`, dds(catTileImage(t, 256)));
+  z.file('icons/category.dds', dds(catIconImage(512))); z.file('icon.dds', dds(catTileImage({ title: brandTitle().split(' ').slice(0, 2).join(' '), logo: '' }, 256)));
+  const data = new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }));
+  return APP.writeNewZip({ dir: S.modsDir, name: catModName() + '.zip', data, overwrite: true });
+}
+$('btnCatWrite').onclick = async () => { try { const w = await writeCatMod(96); toast(w && w.saved ? `Wrote ${catModName()}.zip to your mods folder.` : 'Couldn’t write it.'); } catch (e) { toast('Couldn’t write it: ' + cleanErr(e)); } };
 /* ---- your own brand in the shop (vehicles in your copies are listed under it) ---- */
 const brandTitle = () => ($('brandTitle').value || '').trim() || (farmName().replace(/\w\S*/g, w => w[0] + w.slice(1).toLowerCase()) + ' Farms');
 const brandKey = () => (copyTag() + 'FARMS').toUpperCase().replace(/[^A-Z0-9]/g, '');
 const brandModName = () => `FS25_${copyTag()}_Brand`;
 const brandActive = () => !!(APP && $('brandOn').checked);
 function brandUI() {
+  try { catUI(); } catch (e) { console.warn(e); }
   const sel = $('brandLogo'), cur = sel.value || store.get('brandLogo') || ((window.FDS_DEFAULTS || {}).brandLogo || ''); sel.length = 0;
   for (const l of S.lib) sel.add(new Option(l.name, l.id)); if (S.lib.some(l => l.id === cur)) sel.value = cur;
   $('brandInfo').textContent = `In the shop, open Brands and choose “${brandTitle()}”. The app adds a small mod, ${brandModName()}.zip, to your mods folder that creates the brand; keep it installed. Buildings aren’t listed by brand in the game, so they stay where they are.`;
@@ -1908,7 +1989,7 @@ async function saveMod() {
       const r = Core.decodeDDS(M.files.get(path)), f = ed.mode === 'hide' || ed.mode === 'paint' ? 1 : hdFactor(r.width, r.height), W = r.width * f, H = r.height * f;
       changed.push({ rel: path, data: Core.encodeDDS(composite(upscale(r.rgba, r.width, r.height, f), W, H, ed), W, H, quality()) });
     }
-    const textOut = new Map(txt); let wantBrandMod = false;
+    const textOut = new Map(txt); let wantBrandMod = false, wantCatMod = false;
     const byXml = new Map(); for (const g of grp) { if (!byXml.has(g.xml)) byXml.set(g.xml, []); byXml.get(g.xml).push(g); }
     for (const xml of ren.keys()) if (!byXml.has(xml)) byXml.set(xml, []);
     for (const [xml, gs] of byXml) {
@@ -1928,7 +2009,8 @@ async function saveMod() {
       // renames last: new choices go at the end of a set, so the existing choices keep their positions
       const rn = ren.get(xml);
       if (rn) { for (const [tag, m] of rn.sets) src = Core.renameConfigItems(src, tag, m); if (rn.store) src = Core.setStoreName(src, rn.store);
-        if (rn.brand) { src = Core.setStoreBrand(src, rn.brand); if (rn.brand === brandKey()) wantBrandMod = true; } if (rn.year) src = Core.setStoreYear(src, rn.year); }
+        if (rn.brand) { src = Core.setStoreBrand(src, rn.brand); if (rn.brand === brandKey()) wantBrandMod = true; } if (rn.year) src = Core.setStoreYear(src, rn.year);
+        if (rn.tile) { src = Core.setStoreCategory(src, rn.tile); wantCatMod = true; } if (rn.tab) { src = Core.setBrush(src, catKey().toLowerCase() + '_farms', rn.tab.toLowerCase()); wantCatMod = true; } }
       textOut.set(xml, src);
     }
     // stickers: new geometry + material + texture per model file
@@ -1970,6 +2052,7 @@ async function saveMod() {
     if (asCopy) { const md = modDescPath(); if (md && !textOut.has(md)) textOut.set(md, Core.tagModTitle(xmlText(md), copyTag())); else if (md) textOut.set(md, Core.tagModTitle(textOut.get(md), copyTag())); }
     let branded = 0;
     if (asCopy && brandActive()) branded = brandTexts(k => textOut.get(k) || xmlText(k), (k, v) => textOut.set(k, v), [...M.files.keys()], modDescPath());
+    if (wantCatMod) { const md = modDescPath(); if (md) textOut.set(md, Core.addDependency(textOut.get(md) || xmlText(md), catModName())); } // your tiles/tabs need the category mod
     if (wantBrandMod) { const md = modDescPath(); if (md) textOut.set(md, Core.addDependency(textOut.get(md) || xmlText(md), brandModName())); branded = branded || 1; } // your brand on an item that had none: it needs the brand mod
     for (const [rel, s] of textOut) { const raw = M.files.get(rel) || await z.file(P + rel).async('uint8array'); const bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF; changed.push({ rel, data: new TextEncoder().encode((bom ? '﻿' : '') + s) }); }
 
@@ -1990,6 +2073,8 @@ async function saveMod() {
     }
     if (result && result.canceled) { msg.hidden = true; return; }
     try { if (APP && result && result.path && M.kind !== 'folder') noteLogoUses(result.path, saveName, P, changed); } catch (e) { console.warn(e); }
+    M.savedSig = changeSig(); // saved: leaving this mod now doesn't ask
+    if (wantCatMod && APP) { try { const md = modDescPath(); await writeCatMod(md ? +((xmlText(md).match(/descVersion="(\d+)"/) || [])[1] || 96) : 96); } catch (e) { toast('Couldn’t write the category mod: ' + cleanErr(e)); } }
     if (branded) { try { const md = modDescPath(); await writeBrandMod(md ? +((xmlText(md).match(/descVersion="(\d+)"/) || [])[1] || 96) : 96); } catch (e) { branded = 0; toast('Couldn’t write the brand mod: ' + cleanErr(e)); } }
     let swap = null;
     if (asCopy && APP && $('replaceOrig').checked && saveName !== M.name && M.path && result.path) {

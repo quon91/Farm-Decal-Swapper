@@ -265,6 +265,12 @@
             <div class="field"><label for="brandLogo">Brand logo</label><select id="brandLogo"></select></div>
             <button type="button" class="btn small" id="btnBrandApply">Put copies already in my mods folder under the brand</button>
             <p class="muted hint" id="brandInfo"></p>
+            <h3 style="margin-top:14px">My own section in the shop and the build menu</h3>
+            <p class="muted">Like the Chvck Farms one: a section in the shop with your own tiles, and a category in the build menu with tabs. Pick a tile or tab for each item in <b>Shop options</b>; the app adds the small mod that makes them (<span class="mono" id="catModName"></span>).</p>
+            <div class="field"><span class="lab">Shop tiles</span><div id="catTiles" class="catlist"></div><button type="button" class="btn small" id="catAddTile">Add a tile</button></div>
+            <div class="field"><span class="lab">Build menu tabs <span class="muted">(the last one also takes anything without a tab)</span></span><div id="catTabs" class="catlist"></div><button type="button" class="btn small" id="catAddTab">Add a tab</button></div>
+            <button type="button" class="btn small" id="btnCatWrite">Write the category mod now</button>
+            <p class="muted hint" id="catInfo"></p>
           </div>
           <div id="replaceSet" hidden>
             <label class="check"><input type="checkbox" id="replaceOrig"> <span>Then move the original out of the mods folder and switch my savegames to my copy, so vehicles and buildings I already own keep working</span></label>
