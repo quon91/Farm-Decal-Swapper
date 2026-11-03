@@ -95,7 +95,7 @@
           <div class="placeside">
             <div class="field" id="fPlaceModel"><label for="placeModel">Model</label><select id="placeModel"></select></div>
             <div class="field"><span class="lab">Click the model to place</span><div class="seg" id="placeMode" role="group" aria-label="What to place"><button type="button" data-m="logo" aria-pressed="true">Logo</button><button type="button" data-m="plate" aria-pressed="false">Licence plate</button></div></div>
-            <div class="field" id="fPlaceLogo"><label for="placeLogo">Logo</label><select id="placeLogo"></select></div>
+            <div class="field" id="fPlaceLogo"><span class="lab">Logo</span><button type="button" class="logopick" id="placeLogoBtn" aria-haspopup="dialog"><img alt=""><span></span><b aria-hidden="true">Change</b></button><select id="placeLogo" hidden aria-hidden="true" tabindex="-1"></select></div>
             <div id="plateBox" hidden>
               <div class="field"><span class="lab">Plate</span><div class="seg" id="plStyle" role="group" aria-label="Which plate"><button type="button" data-s="mine" aria-pressed="true">My own plate</button><button type="button" data-s="game">Game plate</button></div></div>
               <div id="myPlateBox">
@@ -175,10 +175,13 @@
         <input type="search" id="libSearch" placeholder="Search your logos" aria-label="Search your logos">
         <button type="button" class="btn small" id="libSelect" aria-pressed="false">Select</button>
         <button type="button" class="btn small" id="libDupes">Find duplicates</button>
+  <button type="button" class="btn small" id="libAutoFolders">Sort into folders</button>
         <span class="muted" id="libSelInfo" hidden></span>
         <button type="button" class="btn small" id="libSelAll" hidden>Select all shown</button>
         <button type="button" class="btn small danger" id="libDelSel" hidden>Delete selected</button>
       </div>
+      <div class="chips" id="libFolders" role="group" aria-label="Folders"></div>
+      <datalist id="folderNames"></datalist>
       <div class="libgrid" id="lib"></div>
       <p class="muted tip">Tip: inside a mod, open any texture, mark a logo with your mouse and choose <b>Add area to library</b>. For JPGs or logos on a solid colour, use <b>Remove background</b>.</p>
       <div class="picsec">
@@ -342,6 +345,23 @@
 </div>
 
 <!-- ======= background remover ======= -->
+<div class="overlay" id="pickDlg" hidden>
+  <div class="dlgbox pickbox" role="dialog" aria-modal="true" aria-labelledby="pickHead">
+    <div class="row-between"><h2 id="pickHead">Pick a logo</h2><button type="button" class="btn small" id="pickClose">Close</button></div>
+    <input type="search" id="pickSearch" placeholder="Search your logos" aria-label="Search your logos">
+    <div class="chips" id="pickFolders" role="group" aria-label="Folders"></div>
+    <div class="pickgrid" id="pickGrid"></div>
+  </div>
+</div>
+<div class="overlay" id="usesDlg" hidden>
+  <div class="dlgbox" role="dialog" aria-modal="true" aria-labelledby="usesHead">
+    <h2 id="usesHead">Mods with this logo</h2>
+    <p class="muted" id="usesWhat"></p>
+    <div id="usesList" class="fixlist"></div>
+    <p class="muted hint" id="usesNote"></p>
+    <div class="edacts"><button type="button" class="btn primary" id="usesUpdate">Update these mods</button><button type="button" class="btn" id="usesScan">Look in my mods folder</button><button type="button" class="btn" id="usesClose">Close</button></div>
+  </div>
+</div>
 <div class="overlay" id="importDlg" hidden>
   <div class="dlgbox" role="dialog" aria-modal="true" aria-labelledby="importHead">
     <h2 id="importHead">Import logo pack</h2>

@@ -24,7 +24,19 @@ function status(msg, kind) { const el = $('status'); if (!msg) { el.hidden = tru
 let toastT = null;
 function toast(msg, ms = 3800) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, ms); }
 function dataBlob(u) { const [h, b] = u.split(','), bin = atob(b), a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return new Blob([a], { type: h.slice(5).split(';')[0] }); }
-const LIB = { selecting: false, sel: new Set(), dupes: new Set() };
+const LIB = { selecting: false, sel: new Set(), dupes: new Set(), folder: '' }; // folder: '' all, '\u0000' no folder
+const folderOf = l => (l.folder || '').trim();
+const libShown = l => { const q = ($('libSearch').value || '').trim().toLowerCase(); return (!q || q.split(/\s+/).every(w => (l.name + ' ' + folderOf(l)).toLowerCase().includes(w))) && (!LIB.folder || (LIB.folder === '\u0000' ? !folderOf(l) : folderOf(l) === LIB.folder)); };
+function libFolders() { const m = new Map(); for (const l of S.lib) { const f = folderOf(l); if (f) m.set(f, (m.get(f) || 0) + 1); } return [...m].sort((a, b) => a[0].localeCompare(b[0])); }
+function drawFolderChips() {
+  const box = $('libFolders'), fs = libFolders(); box.innerHTML = ''; $('folderNames').innerHTML = fs.map(([f]) => `<option value="${f.replace(/"/g, '&quot;')}">`).join('');
+  if (!fs.length) { LIB.folder = ''; return; }
+  if (LIB.folder && LIB.folder !== '\u0000' && !fs.some(([f]) => f === LIB.folder)) LIB.folder = '';
+  const none = S.lib.filter(l => !folderOf(l)).length;
+  for (const [k, label, n] of [['', 'All', S.lib.length], ...fs.map(([f, c]) => [f, f, c]), ...(none ? [['\u0000', 'No folder', none]] : [])]) {
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-pressed', LIB.folder === k); b.textContent = label; const sp = document.createElement('span'); sp.textContent = n; b.appendChild(sp);
+    b.onclick = () => { LIB.folder = k; renderLib(); }; box.appendChild(b); }
+}
 const canvasBlob = c => new Promise(r => c.toBlob(r, 'image/png'));
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
 async function blobToCanvas(blob) { const url = URL.createObjectURL(blob); try { return toCanvas(await loadImg(url)); } finally { URL.revokeObjectURL(url); } }
@@ -191,7 +203,12 @@ function renderModGrid() {
     b.setAttribute('aria-pressed', k === flt); b.querySelector('span').textContent = n; });
   if (!S.mods.length) { grid.innerHTML = '<div class="empty">No mods found in this folder. FS25 keeps them in Documents\\My Games\\FarmingSimulator2025\\mods. Use Change folder if yours is somewhere else.</div>'; return; }
   if (!list.length) { grid.innerHTML = '<div class="empty">No mods match.</div>'; return; }
-  for (const m of list) {
+  let recent = []; try { recent = JSON.parse(store.get('recentMods') || '[]'); } catch (e) {}
+  const recentMods = q || flt !== 'all' ? [] : recent.map(r => S.mods.find(m => m.path === r.path)).filter(Boolean).slice(0, 6);
+  const head = t => { const h = document.createElement('h3'); h.className = 'gridhead'; h.textContent = t; grid.appendChild(h); };
+  if (recentMods.length) head('Recently opened');
+  for (const m of recentMods.concat(recentMods.length ? [null] : [], list)) {
+    if (m === null) { head('All mods'); continue; }
     const b = document.createElement('button'); b.type = 'button'; b.className = 'modcard';
     b.innerHTML = '<canvas width="64" height="64" class="checker"></canvas><div style="min-width:0"><div class="t"></div><div class="f"></div><div class="m"></div><div class="badges"></div></div>';
     for (const [k, t] of modBadges(m)) { const s = document.createElement('span'); s.className = 'mb b-' + k; s.textContent = t; b.querySelector('.badges').appendChild(s); }
@@ -244,8 +261,13 @@ $('btnOpenZip').onclick = async () => {
   else $('zipIn').click();
 };
 $('zipIn').addEventListener('change', e => { const f = e.target.files[0]; if (f) openZipFile(f, null); e.target.value = ''; });
+function noteRecent(m) { // the mods screen lists these first
+  let r = []; try { r = JSON.parse(store.get('recentMods') || '[]'); } catch (e) {}
+  r = [{ path: m.path, name: m.name, t: Date.now() }].concat(r.filter(x => x.path !== m.path)).slice(0, 8); store.set('recentMods', JSON.stringify(r));
+}
 async function openModFromPath(m) {
   if (S.mod && changeCount() && !confirmDiscard()) return;
+  noteRecent(m);
   setView('mods'); status('Opening ' + m.name + '…', 'busy'); await tick();
   try {
     if (m.kind === 'folder') { const files = await APP.readFolder(m.path); const zip = new JSZip(); for (const f of files) zip.file(f.rel, f.data); await loadMod(zip, m.name, m.path, 'folder'); }
@@ -329,7 +351,7 @@ async function addLogo(blob, name, opts = {}) {
   const rec = { id: opts.id || newId(), name: name || 'Logo', canvas: opts.canvas || trimCanvas(raw), original: blob, order: S.lib.length, cleaned: !!opts.cleaned, needsBg: !edgeIsClear(raw) && !opts.cleaned };
   S.lib.push(rec); return rec;
 }
-async function saveRec(rec) { const image = await canvasBlob(rec.canvas); await dbPut({ id: rec.id, name: rec.name, order: rec.order, image, original: rec.original, cleaned: rec.cleaned, recipe: rec.recipe || null }); }
+async function saveRec(rec) { const image = await canvasBlob(rec.canvas); await dbPut({ id: rec.id, name: rec.name, order: rec.order, image, original: rec.original, cleaned: rec.cleaned, recipe: rec.recipe || null, folder: rec.folder || '' }); }
 async function addLogoFiles(files) {
   let last = null;
   for (const f of files) {
@@ -347,11 +369,17 @@ function renderLib() {
   const box = $('lib'); box.innerHTML = '';
   $('navLibCount').textContent = S.lib.length || '';
   if (!S.lib.length) { box.innerHTML = '<div class="empty" style="grid-column:1/-1">Your library is empty. Use <b>Add logos</b> to bring in your farm logo and any brands you want, or drop image files here.</div>'; return; }
-  const q = ($('libSearch').value || '').trim().toLowerCase(), sel = LIB.sel;
+  const sel = LIB.sel;
   for (const id of [...sel]) if (!S.lib.some(l => l.id === id)) sel.delete(id);
-  libSelUI();
-  S.lib.forEach((l, i) => {
-    if (q && !q.split(/\s+/).every(w => l.name.toLowerCase().includes(w))) return;
+  libSelUI(); drawFolderChips();
+  // with folders and nothing picked, show each folder under its own heading
+  const grouped = !LIB.folder && libFolders().length && !($('libSearch').value || '').trim();
+  const order = grouped ? [...libFolders().map(([f]) => f), ''].flatMap(f => S.lib.filter(l => folderOf(l) === f).map(l => [l, f])) : S.lib.map(l => [l, null]);
+  let lastF;
+  order.forEach(([l, gf]) => {
+    const i = S.lib.indexOf(l);
+    if (!libShown(l)) return;
+    if (grouped && gf !== lastF) { lastF = gf; const h = document.createElement('h3'); h.className = 'libhead'; h.textContent = gf || 'No folder'; box.appendChild(h); }
     const el = document.createElement('div'); el.className = 'libcard' + (sel.has(l.id) ? ' sel' : '') + (LIB.dupes.has(l.id) ? ' dupe' : '');
     el.innerHTML = `<div class="pv checker"><img alt=""></div><div class="body"><input type="text" aria-label="Logo name"><span class="dim"></span>
       <div class="acts"><button type="button" class="btn small" data-a="edit" hidden>Edit in Logo maker</button><button type="button" class="btn small" data-a="bg">Remove background</button><button type="button" class="btn small" data-a="up" aria-label="Move earlier">←</button><button type="button" class="btn small" data-a="down" aria-label="Move later">→</button><button type="button" class="btn small danger" data-a="del">Delete</button></div></div>`;
@@ -363,7 +391,12 @@ function renderLib() {
     png.onclick = async () => { try { const r = await offerFile(Core.slug(l.name) + '.png', await canvasBlob(l.canvas), 'png'); if (r === 'saved') toast('Saved ' + l.name + '.png'); } catch (e) { toast('Couldn’t save: ' + e.message); } };
     el.querySelector('.acts').prepend(png);
     const nm = el.querySelector('input[type=text]'); nm.value = l.name;
+    const fo = document.createElement('input'); fo.type = 'text'; fo.className = 'folder'; fo.placeholder = 'Folder'; fo.setAttribute('list', 'folderNames'); fo.setAttribute('aria-label', 'Folder'); fo.value = folderOf(l);
+    fo.addEventListener('change', () => { l.folder = fo.value.trim(); saveRec(l); renderLib(); refreshLogos(); }); nm.after(fo);
     nm.addEventListener('change', () => { l.name = nm.value.trim() || 'Logo'; nm.value = l.name; saveRec(l); refreshLogos(); });
+    const nUse = usesOf(l).length;
+    if (nUse) { const ub = document.createElement('button'); ub.type = 'button'; ub.className = 'linkish'; ub.textContent = `Used in ${nUse} mod${nUse === 1 ? '' : 's'}`; ub.onclick = () => openUses(l); el.querySelector('.dim').after(ub); }
+    else if (APP) { const ub = document.createElement('button'); ub.type = 'button'; ub.className = 'linkish'; ub.textContent = 'Which mods use it?'; ub.onclick = () => openUses(l); el.querySelector('.dim').after(ub); }
     el.querySelector('.dim').textContent = `${l.canvas.width} × ${l.canvas.height} px` + (l.needsBg && !l.cleaned ? ' · has a solid background' : '') + (l.cleaned ? ' · background removed' : '');
     el.querySelector('[data-a=bg]').onclick = () => openBg(l);
     if (l.recipe) { const eb = el.querySelector('[data-a=edit]'); eb.hidden = false; eb.onclick = () => lmEdit(l); el.querySelector('[data-a=bg]').hidden = true; }
@@ -413,6 +446,68 @@ $('upPic').addEventListener('change', async e => { const files = [...e.target.fi
   renderPics(); renderMakerPics(); if (n) toast(`${n} picture${n === 1 ? '' : 's'} added.`); });
 function refreshLogos() { if (LM.ready) fillLogoPic(); brandUI(); if (S.mod) { renderOpts(); repaintCards(); updateChanges(); if (S.mod.place) { fillPlaceLogos(); drawStickers(); } } if (S.current) { refreshEditorLogos(); drawEditor(); } }
 
+/* ---- which mods use each logo, and updating them after the logo changes ---- */
+function logoUses() { try { return JSON.parse(store.get('logoUses') || '{}'); } catch (e) { return {}; } }
+function noteLogoUses(path, name, prefix, changed) {
+  const M = S.mod, logos = {};
+  const add = (id, k, v) => { const l = logoById(id); if (!l) return; const e = logos[id] || (logos[id] = { stickers: [], other: 0, aspect: +(l.canvas.width / l.canvas.height).toFixed(4) }); if (k === 'sticker') { if (!e.stickers.includes(v)) e.stickers.push(v); } else e.other++; };
+  for (const c of changed) if (c.logo) add(c.logo, 'sticker', prefix + c.rel);
+  for (const [, ed] of M.edits) if (ed.mode === 'logo' && ed.logo && ed.regions.some(r => r.on)) add(ed.logo, 'other');
+  for (const [k, g] of M.groups) if (g.on) for (const id of g.logos) add(id, 'other');
+  const all = logoUses(); for (const k of Object.keys(all)) if (all[k].path === M.path && k !== path) delete all[k]; // the original moved away: its uses moved to the copy
+  if (Object.keys(logos).length) all[path] = { path, name, t: Date.now(), logos: Object.assign((all[path] || {}).logos || {}, logos) }; else delete all[path];
+  store.set('logoUses', JSON.stringify(all)); renderLib();
+}
+function usesOf(l) { return Object.values(logoUses()).filter(u => u.logos && u.logos[l.id]); }
+const USES = { logo: null };
+function openUses(l) {
+  USES.logo = l; const list = usesOf(l), box = $('usesList'); box.innerHTML = '';
+  $('usesHead').textContent = `Mods with “${l.name}”`;
+  $('usesWhat').textContent = list.length ? `Saved with this logo in ${list.length} mod${list.length === 1 ? '' : 's'}.` : 'No saved mods with this logo yet. Click Look in my mods folder to find ones saved before the app kept track.';
+  for (const u of list) { const e = u.logos[l.id], row = document.createElement('div'); row.className = 'fixrow';
+    const parts = []; if (e.stickers.length) parts.push(`${e.stickers.length} placed-logo picture${e.stickers.length === 1 ? '' : 's'}`); if (e.other) parts.push(`${e.other} texture or shop choice${e.other === 1 ? '' : 's'}`);
+    row.innerHTML = '<div style="min-width:0"><div class="t"></div><div class="m muted"></div></div>'; row.querySelector('.t').textContent = u.name; row.querySelector('.m').textContent = parts.join(' · ') + (u.t ? ' · saved ' + new Date(u.t).toLocaleDateString() : ''); box.appendChild(row); }
+  const can = list.some(u => u.logos[l.id].stickers.length), other = list.some(u => u.logos[l.id].other);
+  $('usesUpdate').hidden = !can || !APP; $('usesScan').hidden = !APP;
+  $('usesNote').textContent = (can ? 'Update these mods puts the current version of the logo in place of the old one in their placed logos (each mod is backed up first). ' : '') +
+    (other ? 'Logos painted into a mod’s own textures or decal shop choices can’t be swapped from here: open that mod and apply the logo again.' : '');
+  $('usesDlg').hidden = false;
+}
+$('usesClose').onclick = () => { $('usesDlg').hidden = true; };
+$('usesScan').onclick = async () => { // mods saved before the app kept track: their placed-logo picture is named after the logo
+  const l = USES.logo; if (!l) return; const want = `custom_decals/${Core.slug(l.name).toLowerCase()}_sticker.dds`, all = logoUses(); let found = 0;
+  $('usesScan').disabled = true; $('usesWhat').textContent = 'Looking through your mods…';
+  for (const m of S.mods.filter(m => m.kind === 'zip')) { const names = await APP.zipNames(m.path); if (!names) continue;
+    const hits = names.filter(n => n.toLowerCase().endsWith(want)); if (!hits.length) continue; found++;
+    const u = all[m.path] || (all[m.path] = { path: m.path, name: m.name, t: m.mtime || 0, logos: {} }); const e = u.logos[l.id] || (u.logos[l.id] = { stickers: [], other: 0, aspect: +(l.canvas.width / l.canvas.height).toFixed(4) });
+    for (const h of hits) if (!e.stickers.includes(h)) e.stickers.push(h); }
+  store.set('logoUses', JSON.stringify(all)); $('usesScan').disabled = false; openUses(l); renderLib();
+  toast(found ? `Found it in ${found} mod${found === 1 ? '' : 's'}.` : 'No other mods in your mods folder have this logo as a placed logo.');
+};
+function ddsSize(u8) { const v = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); return u8.length > 20 && v.getUint32(0, true) === 0x20534444 ? { h: v.getUint32(12, true), w: v.getUint32(16, true) } : null; }
+$('usesUpdate').onclick = async () => {
+  const l = USES.logo; if (!l) return; const list = usesOf(l).filter(u => u.logos[l.id].stickers.length);
+  if (APP.gameRunning && await APP.gameRunning()) { toast('Close the game first: it keeps mods open while it runs.'); return; }
+  $('usesUpdate').disabled = true; let done = 0, stretched = 0; const failed = [];
+  for (const u of list) {
+    try {
+      $('usesWhat').textContent = `Updating ${u.name}…`; await tick();
+      const z = await JSZip.loadAsync(await APP.readFile(u.path)), e = u.logos[l.id]; let n = 0;
+      for (const rel of e.stickers) { const f = z.file(rel); if (!f) continue; const sz = ddsSize(await f.async('uint8array')); if (!sz) continue;
+        const c = document.createElement('canvas'); c.width = sz.w; c.height = sz.h; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(l.canvas, 0, 0, sz.w, sz.h);
+        z.file(rel, Core.encodeDDS(g.getImageData(0, 0, sz.w, sz.h).data, sz.w, sz.h, quality())); n++; }
+      if (!n) { failed.push(u.name + ' (logo not found in it)'); continue; }
+      if (e.aspect && Math.abs(l.canvas.width / l.canvas.height - e.aspect) / e.aspect > 0.05) stretched++;
+      const data = new Uint8Array(await (await z.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })).arrayBuffer());
+      const dir = u.path.replace(/[\\/][^\\/]+$/, ''), name = u.path.slice(dir.length + 1);
+      const w = await APP.writeNewZip({ dir, name, data, overwrite: true, backup: true }); if (!w || !w.saved) throw new Error('not saved');
+      e.aspect = +(l.canvas.width / l.canvas.height).toFixed(4); u.t = Date.now(); done++;
+    } catch (err) { failed.push(u.name + ' (' + cleanErr(err) + ')'); }
+  }
+  const all = logoUses(); for (const u of list) if (all[u.path]) all[u.path] = Object.assign(all[u.path], { t: u.t, logos: Object.assign(all[u.path].logos, { [l.id]: u.logos[l.id] }) }); store.set('logoUses', JSON.stringify(all));
+  $('usesUpdate').disabled = false; openUses(l);
+  toast(`Updated ${done} mod${done === 1 ? '' : 's'}.` + (stretched ? ` The logo’s shape changed, so it may look stretched in ${stretched}: place it again there if it does.` : '') + (failed.length ? ` Not updated: ${failed.join(', ')}.` : ''));
+};
 /* ---- library tools: search, select several, find duplicates ---- */
 function libSelUI() {
   const n = LIB.sel.size; $('libSelect').setAttribute('aria-pressed', LIB.selecting); $('libSelect').textContent = LIB.selecting ? 'Done' : 'Select';
@@ -420,7 +515,17 @@ function libSelUI() {
 }
 $('libSearch').addEventListener('input', () => renderLib());
 $('libSelect').onclick = () => { LIB.selecting = !LIB.selecting; if (!LIB.selecting) { LIB.sel.clear(); LIB.dupes.clear(); } renderLib(); };
-$('libSelAll').onclick = () => { const q = ($('libSearch').value || '').trim().toLowerCase(); for (const l of S.lib) if (!q || q.split(/\s+/).every(w => l.name.toLowerCase().includes(w))) LIB.sel.add(l.id); renderLib(); };
+$('libSelAll').onclick = () => { for (const l of S.lib) if (libShown(l)) LIB.sel.add(l.id); renderLib(); };
+$('libAutoFolders').onclick = async () => { // "Cypress Bend Trucking - Crest" goes in "Cypress Bend Trucking"; "CAT (black)" in "CAT"
+  let n = 0; const auto = new Set();
+  for (const l of S.lib) { if (folderOf(l)) continue; let f = l.name.split(' - ')[0].replace(/\s*\([^)]*\)\s*$/, '').replace(/[_]+/g, ' ').trim(); if (!f || f === l.name.trim() && !/\(/.test(l.name)) { /* a single name: still a folder of its own name */ }
+    if (f) { l.folder = f; auto.add(l); n++; } }
+  // a folder with just one logo isn't much use: join it to a folder its name starts with, if there is one
+  const fs = libFolders();
+  for (const l of auto) { const f = folderOf(l); if (fs.find(([x]) => x === f)[1] > 1) { await saveRec(l); continue; } const host = fs.filter(([x, c]) => c > 1 && x !== f && f.toLowerCase().startsWith(x.toLowerCase())).sort((a, b) => b[0].length - a[0].length)[0];
+    l.folder = host ? host[0] : ''; await saveRec(l); }
+  renderLib(); refreshLogos(); n = [...auto].filter(l => folderOf(l)).length; toast(n ? `Sorted ${n} logo${n === 1 ? '' : 's'} into folders by name. Change any folder on the logo itself.` : 'Every logo already has a folder.');
+};
 $('libDelSel').onclick = async () => {
   const gone = S.lib.filter(l => LIB.sel.has(l.id)); if (!gone.length) return;
   for (const l of gone) await dbDel(l.id);
@@ -455,7 +560,7 @@ $('libDupes').onclick = () => {
 /* ---- library packs (zip of PNGs + names) ---- */
 async function libraryPack() {
   const z = new JSZip(), meta = [];
-  for (const l of S.lib) { const f = `logos/${Core.slug(l.name)}_${l.id.slice(-4)}.png`; z.file(f, await canvasBlob(l.canvas)); meta.push({ name: l.name, file: f, order: l.order, recipe: l.recipe || undefined }); }
+  for (const l of S.lib) { const f = `logos/${Core.slug(l.name)}_${l.id.slice(-4)}.png`; z.file(f, await canvasBlob(l.canvas)); meta.push({ name: l.name, file: f, order: l.order, recipe: l.recipe || undefined, folder: l.folder || undefined }); }
   const pics = []; for (const p of S.pics) { const f = `pictures/${Core.slug(p.name)}_${p.id.slice(-4)}.png`; z.file(f, await canvasBlob(p.canvas)); pics.push({ name: p.name, file: f, cut: p.cut }); }
   z.file('library.json', JSON.stringify({ app: 'Farm Decal Swapper', version: 1, logos: meta, pictures: pics }, null, 2));
   return z.generateAsync({ type: 'blob', compression: 'DEFLATE' });
@@ -492,7 +597,7 @@ $('packIn').addEventListener('change', async e => {
     let n = 0, skipped = 0;
     for (const it of list) { const zf = z.file(it.file); if (!zf) continue; const blob = new Blob([await zf.async('uint8array')], { type: 'image/png' }); const rec = await addLogo(blob, it.name, { cleaned: true });
       if (S.lib.some(l => l !== rec && l.name.toLowerCase() === rec.name.toLowerCase() && l.canvas.width === rec.canvas.width && l.canvas.height === rec.canvas.height)) { S.lib.pop(); skipped++; continue; } // already have it
-      rec.needsBg = false; rec.recipe = it.recipe || null; await saveRec(rec); n++; }
+      rec.needsBg = false; rec.recipe = it.recipe || null; rec.folder = it.folder || ''; await saveRec(rec); n++; }
     let np = 0; for (const it of picList) { const zf = z.file(it.file); if (!zf) continue; const c = await blobToCanvas(new Blob([await zf.async('uint8array')], { type: 'image/png' }));
       if (S.pics.some(p => p.name.toLowerCase() === String(it.name).toLowerCase() && p.canvas.width === c.width && p.canvas.height === c.height)) { skipped++; continue; } const rec = await addPicture(c, it.name, { autoCut: false }); rec.cut = !!it.cut; await picPut({ id: rec.id, name: rec.name, image: await canvasBlob(rec.canvas), cut: rec.cut, order: rec.order }); np++; }
     renderLib(); renderPics(); renderMakerPics(); refreshLogos(); toast(`${n} logo${n === 1 ? '' : 's'}${np ? ` and ${np} picture${np === 1 ? '' : 's'}` : ''} imported.${skipped ? ` ${skipped} you already had were skipped.` : ''}`);
@@ -1079,11 +1184,40 @@ async function loadModel(i3d) {
     loadedModel = M.name + '|' + i3d; st.hidden = true; drawStickers();
   } catch (e) { st.textContent = 'This model couldn’t be shown: ' + e.message; }
 }
+/* ---- logo picker: pictures, folders and search instead of a long list ---- */
+const PICK = { folder: '', onPick: null, cur: '' };
+function openLogoPicker(cur, onPick) {
+  if (!S.lib.length) { toast('Add logos in the Logo library first.'); return; }
+  PICK.cur = cur; PICK.onPick = onPick; $('pickSearch').value = ''; $('pickDlg').hidden = false; drawPicker(); setTimeout(() => $('pickSearch').focus(), 30);
+}
+function drawPicker() {
+  const q = ($('pickSearch').value || '').trim().toLowerCase(), fs = libFolders(), box = $('pickFolders'), grid = $('pickGrid'); box.innerHTML = ''; grid.innerHTML = '';
+  if (PICK.folder && PICK.folder !== '\u0000' && !fs.some(([f]) => f === PICK.folder)) PICK.folder = '';
+  if (fs.length) for (const [k, label] of [['', 'All'], ...fs.map(([f]) => [f, f]), ...(S.lib.some(l => !folderOf(l)) ? [['\u0000', 'No folder']] : [])]) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.setAttribute('aria-pressed', PICK.folder === k); b.onclick = () => { PICK.folder = k; drawPicker(); }; box.appendChild(b); }
+  const ok = l => (!q || q.split(/\s+/).every(w => (l.name + ' ' + folderOf(l)).toLowerCase().includes(w))) && (!PICK.folder || (PICK.folder === '\u0000' ? !folderOf(l) : folderOf(l) === PICK.folder));
+  const grouped = !PICK.folder && fs.length && !q, list = grouped ? [...fs.map(([f]) => f), ''].flatMap(f => S.lib.filter(l => folderOf(l) === f)) : S.lib.filter(ok);
+  let last; let n = 0;
+  for (const l of list) {
+    if (grouped && folderOf(l) !== last) { last = folderOf(l); const h = document.createElement('h3'); h.className = 'libhead'; h.textContent = last || 'No folder'; grid.appendChild(h); }
+    const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-pressed', l.id === PICK.cur);
+    b.innerHTML = '<div class="pv checker"><img alt=""></div><span></span>'; b.querySelector('img').src = thumbURL(l.canvas); b.querySelector('span').textContent = l.name;
+    b.onclick = () => { $('pickDlg').hidden = true; PICK.onPick && PICK.onPick(l.id); }; grid.appendChild(b); n++;
+  }
+  if (!n) grid.innerHTML = '<div class="empty" style="grid-column:1/-1">No logos match.</div>';
+}
+$('pickSearch').addEventListener('input', drawPicker);
+$('pickClose').onclick = () => { $('pickDlg').hidden = true; };
+$('pickDlg').addEventListener('click', e => { if (e.target === $('pickDlg')) $('pickDlg').hidden = true; });
+$('pickSearch').addEventListener('keydown', e => { if (e.key === 'Escape') $('pickDlg').hidden = true; if (e.key === 'Enter') { const b = $('pickGrid').querySelector('button'); if (b) b.click(); } });
+function showPlaceLogo() { const l = logoById($('placeLogo').value), b = $('placeLogoBtn'); b.disabled = !l; b.querySelector('img').src = l ? thumbURL(l.canvas) : ''; b.querySelector('img').hidden = !l; b.querySelector('span').textContent = l ? l.name : 'Add logos in the Logo library first'; }
+$('placeLogoBtn').onclick = () => openLogoPicker($('placeLogo').value, id => { $('placeLogo').value = id; $('placeLogo').dispatchEvent(new Event('change')); showPlaceLogo(); });
 function fillPlaceLogos() {
   const sel = $('placeLogo'), cur = sel.value; sel.innerHTML = '';
-  if (!S.lib.length) { const o = document.createElement('option'); o.textContent = 'Add logos in the Logo library first'; sel.appendChild(o); sel.disabled = true; return; }
+  if (!S.lib.length) { const o = document.createElement('option'); o.textContent = 'Add logos in the Logo library first'; sel.appendChild(o); sel.disabled = true; showPlaceLogo(); return; }
   sel.disabled = false; for (const l of S.lib) { const o = document.createElement('option'); o.value = l.id; o.textContent = l.name; sel.appendChild(o); }
   const st = selected(); sel.value = st ? st.logo : (S.lib.some(l => l.id === cur) ? cur : S.lib[0].id);
+  showPlaceLogo();
 }
 const selected = () => S.mod && S.mod.place && S.mod.stickers.find(x => x.id === S.mod.place.sel) || null;
 $('placeLogo').addEventListener('change', e => { const st = selected(); if (st) { st.logo = e.target.value; drawStickers(); updateChanges(); } });
@@ -1350,7 +1484,7 @@ function drawStickers(quick) { // quick: only the 3D view (used while dragging)
   const st = selected(), ed = $('stickerEdit'); ed.hidden = !st;
   if (st) {
     $('stWidth').value = st.width; $('stWidthV').textContent = st.width.toFixed(2) + ' m'; $('stRot').value = st.rot; $('stRotV').textContent = st.rot + '°';
-    $('stMirror').checked = st.mirror; $('stWrap').checked = st.wrap !== false; $('placeLogo').value = st.logo;
+    $('stMirror').checked = st.mirror; $('stWrap').checked = st.wrap !== false; $('placeLogo').value = st.logo; showPlaceLogo();
     $('stInfo').textContent = `On “${st.name || 'part'}”` + (st.twin ? ` and “${st.twin.name || 'part'}”` : '') + (st.twinNote ? '. ' + st.twinNote : '.');
   }
   drawShopLogo(); drawPlateBox();
@@ -1489,7 +1623,7 @@ async function buildStickers(i3d, list) {
     const l = logoById(id), W = hdOn() ? 2048 : 1024; let H = 1; while (H * 2 <= W / (l.canvas.width / l.canvas.height) * 1.4) H *= 2; H = Math.max(64, H);
     const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(l.canvas, 0, 0, W, H); // the sticker's shape restores the proportions
     const tex = `custom_decals/${Core.slug(l.name).toLowerCase()}_sticker.dds`;
-    files.push({ rel: tex, data: Core.encodeDDS(g.getImageData(0, 0, W, H).data, W, H, quality()) });
+    files.push({ rel: tex, data: Core.encodeDDS(g.getImageData(0, 0, W, H).data, W, H, quality()), logo: id });
     const fid = ++maxFile, mid = ++maxMat; matFor.set(id, mid);
     const fi = indentAt(filesEl.closeStart) + '  ', mi = indentAt(matsEl.closeStart) + '  ';
     ops.push({ at: lineStart(filesEl.closeStart), del: 0, text: `${fi}<File fileId="${fid}" filename="${Core.relPath(i3d, tex)}"/>${nl}` });
@@ -1734,6 +1868,7 @@ async function saveMod() {
       else { const r = await offerFile(saveName, blob, 'zip'); result = r === 'saved' ? { saved: true, name: saveName, size: blob.size } : { canceled: true }; }
     }
     if (result && result.canceled) { msg.hidden = true; return; }
+    try { if (APP && result && result.path && M.kind !== 'folder') noteLogoUses(result.path, saveName, P, changed); } catch (e) { console.warn(e); }
     if (branded) { try { const md = modDescPath(); await writeBrandMod(md ? +((xmlText(md).match(/descVersion="(\d+)"/) || [])[1] || 96) : 96); } catch (e) { branded = 0; toast('Couldn’t write the brand mod: ' + cleanErr(e)); } }
     let swap = null;
     if (asCopy && APP && $('replaceOrig').checked && saveName !== M.name && M.path && result.path) {
@@ -1921,7 +2056,9 @@ async function lmSave() {
   const l = S.lib.find(x => x.id === LM.editing); if (!l) return;
   const c = await lmRender(1), blob = await canvasBlob(c);
   l.canvas = trimCanvas(c); l.original = blob; l.recipe = lmRecipe(); l.name = $('lmName').value.trim() || l.name; l.cleaned = true; l.needsBg = false;
-  await saveRec(l); renderLib(); refreshLogos(); lmEditUI(); toast(`“${l.name}” updated. Mods use the new version the next time you save them.`);
+  await saveRec(l); renderLib(); refreshLogos(); lmEditUI();
+  if (APP && usesOf(l).some(u => u.logos[l.id].stickers.length)) openUses(l); // offer to update the mods that already have it
+  else toast(`“${l.name}” updated. Mods use the new version the next time you save them.`);
 }
 async function lmAdd() {
   const c = await lmRender(1), blob = await canvasBlob(c), name = $('lmName').value.trim() || lmDefaultName();
@@ -1939,7 +2076,7 @@ async function lmPng() {
   const saved = await dbAll();
   if (saved && saved.length) {
     saved.sort((a, b) => a.order - b.order);
-    for (const r of saved) { try { const rec = await addLogo(r.image, r.name, { id: r.id, cleaned: r.cleaned }); rec.original = r.original || r.image; rec.order = r.order; rec.recipe = r.recipe || null; if (r.cleaned) rec.needsBg = false; } catch (e) {} }
+    for (const r of saved) { try { const rec = await addLogo(r.image, r.name, { id: r.id, cleaned: r.cleaned }); rec.original = r.original || r.image; rec.order = r.order; rec.recipe = r.recipe || null; rec.folder = r.folder || ''; if (r.cleaned) rec.needsBg = false; } catch (e) {} }
   }
   // logos an update withdrew (replaced designs): remove them once
   if (window.FDS_SEED_REMOVE && window.FDS_SEED_REMOVE.length) {
@@ -1956,7 +2093,7 @@ async function lmPng() {
       const mine = S.lib.find(l => l.id === d.id);
       if (mine && d.recipe && !mine.recipe) { mine.recipe = d.recipe; await saveRec(mine); }
       if (done.includes(d.id) || have.has(d.id)) continue;
-      try { const rec = await addLogo(dataBlob(d.src), d.name, { id: d.id }); rec.needsBg = false; rec.order = S.lib.length; rec.recipe = d.recipe || null; await saveRec(rec); } catch (e) {}
+      try { const rec = await addLogo(dataBlob(d.src), d.name, { id: d.id }); rec.needsBg = false; rec.order = S.lib.length; rec.recipe = d.recipe || null; rec.folder = d.folder || ''; await saveRec(rec); } catch (e) {}
       done.push(d.id);
     }
     store.set('seededIds', JSON.stringify(done)); store.set('seeded', '1');

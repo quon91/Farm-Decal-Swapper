@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('fds', {
   pickFolder: (current, title) => call('pickFolder', current, title),
   gameDataDir: dir => call('gameDataDir', dir),
   readGameFile: (dataDir, rel) => call('readGameFile', dataDir, rel),
+  zipNames: file => call('zipNames', file),
   listMods: dir => call('listMods', dir),
   readFile: p => call('readFile', p),
   readFolder: dir => call('readFolder', dir),

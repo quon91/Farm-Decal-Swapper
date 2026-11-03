@@ -57,7 +57,10 @@ Go to **Logo maker**, click a starting point (Farm, Construction, Landscaping, L
 - **Game folder:** most mods use the game's own wheels, hubs and textures. *Settings → Game folder* finds the Farming Simulator 25 install by itself (Steam, Epic or the GIANTS version); if it can't, click **Choose game folder**. The app only reads from it. Without it, the 3D view still shows wheels that come with the mod.
 - **Quality:** *Settings → Texture quality* switches between **Best** (no loss, a few MB per logo texture) and **Smaller files** (DXT5).
 - **Moving your library:** **Export pack** saves your logo library as one zip, and **Import pack** loads it on another PC. When you import into a library that already has logos, choose **Add to my library** or **Replace my library with it** (your current library is saved as a pack in `Documents\Farm Decal Swapper\Backups` first).
-- **Tidying your library:** search by name, **Select** several logos to delete them at once, and **Find duplicates** ticks copies of the same picture (keeping the biggest, or the one you can edit). **Save PNG** on any logo saves it as a file.
+- **Tidying your library:** search by name, **Select** several logos to delete them at once, and **Find duplicates** ticks copies of the same picture (keeping the biggest, or the one you can edit). **Save PNG** on any logo saves it as a file. Put logos in **folders** (type a folder name on the logo, or click **Sort into folders** to sort them by name); folders show as tabs in the library and in the logo picker, and travel with packs.
+- **Picking a logo:** in Place logos, click the logo to open a picker with pictures, folders and search (type and press Enter to take the first match).
+- **Which mods use a logo:** each logo shows the mods you saved it in (**Which mods use it?** also looks through your mods folder for ones saved earlier). After you change a logo in the Logo maker, **Update these mods** puts the new version into their placed logos, backing up each mod first. Logos painted into a mod's own textures need that mod opened and the logo applied again.
+- **Recently opened mods** are listed first on the Mods screen.
 - **Mod authors' work:** patch mods for your own use. Don't re-upload someone else's mod without their permission.
 
 ## License

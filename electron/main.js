@@ -194,6 +194,9 @@ ipcMain.handle('gameDataDir', async (_e, dir) => {
   for (const t of tries) { const g = gameDataFrom(t); if (g) return g; }
   return null;
 });
+ipcMain.handle('zipNames', async (_e, file) => { // names of a zip's logo files (custom_decals/...), without reading the zip
+  const names = []; try { await readZipEntries(file, n => { if (/(^|\/)custom_decals\//i.test(n)) names.push(n); return false; }); } catch (e) { return null; } return names;
+});
 ipcMain.handle('readGameFile', async (_e, dataDir, rel) => { // rel is the part after $data/; never leaves the data folder
   if (!dataDir || !rel || !isDataDir(dataDir)) return null;
   const full = path.resolve(dataDir, rel.replace(/^[\\/]+/, ''));
