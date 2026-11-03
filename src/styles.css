@@ -372,3 +372,4 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .catrow canvas.wide{width:80px;height:40px}
 .catrow .note{flex-basis:100%;font-size:.76rem;color:var(--muted);margin:-2px 0 0 86px}
 .metafield select{max-width:260px}
+.metafield input.bad{border-color:#b3261e}

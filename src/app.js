@@ -913,7 +913,7 @@ function renamePlan() { // what will change: Map(xml -> { sets: Map(tag -> Map(i
   for (const [xml, name] of M.storeNames) { const cur = (storeItems().find(s => s.xml === xml) || {}).name; if (name.trim() && cur && name.trim() !== cur.text) at(xml).store = name.trim(); }
   // a brand or year only for items that have none
   for (const [xml, b] of M.storeBrands || []) { const v = b.trim().toUpperCase(); if (v && v !== Core.storeBrandOf(xmlText(xml)).toUpperCase()) at(xml).brand = v; }
-  for (const [xml, y] of M.storeYears || []) { const v = String(y).trim(); if (/^\d{4}$/.test(v) && !Core.storeYearOf(xmlText(xml))) at(xml).year = v; }
+  for (const [xml, y] of M.storeYears || []) { const v = String(y).trim(); if (/^\d{4}$/.test(v) && v !== Core.storeYearOf(xmlText(xml))) at(xml).year = v; }
   for (const [xml, v] of M.storeTiles || []) if (v) at(xml).tile = v;
   for (const [xml, v] of M.storeTabs || []) if (v) at(xml).tab = v;
   return out;
@@ -958,7 +958,7 @@ function renderOpts() {
   const stores = storeItems();
   if (stores.length) {
     const sec = document.createElement('div'); sec.className = 'opts names';
-    sec.innerHTML = '<div class="opthead"><h3>Name in the shop</h3><span class="muted">What the shop calls each vehicle in this mod, and its brand: each keeps the brand it has until you pick another (yours, one from your brand list, or the game’s). Items without a year can be given one.</span></div><datalist id="brandNames"></datalist>';
+    sec.innerHTML = '<div class="opthead"><h3>Name in the shop</h3><span class="muted">What the shop calls each vehicle in this mod, and its brand: each keeps the brand it has until you pick another (yours, one from your brand list, or the game’s). Type a year to add one or change it.</span></div><datalist id="brandNames"></datalist>';
     fillBrandNames(sec.querySelector('#brandNames'));
     for (const s of stores) {
       const row = document.createElement('label'), inp = document.createElement('input'); row.className = 'namerow';
@@ -974,7 +974,13 @@ function renderOpts() {
         else { const i = document.createElement('input'); i.type = 'text'; const { list, ...rest } = opts; Object.assign(i, rest); if (list) i.setAttribute('list', list); i.value = map.get(s.xml) || ''; i.oninput = () => { const v = i.value.trim(); if (v) map.set(s.xml, v); else map.delete(s.xml); updateChanges(); }; w.appendChild(i); }
         meta.appendChild(w); };
       brandField(meta, s.xml, curB);
-      field('Year', curY, S.mod.storeYears, { placeholder: 'none yet', inputMode: 'numeric', maxLength: 4, size: 6 });
+      { // the year: shows what it has, type a new one to change it (or add one); clear the box to keep it
+        const w = document.createElement('label'); w.className = 'metafield'; w.append(document.createTextNode('Year '));
+        const i = document.createElement('input'); i.type = 'text'; i.inputMode = 'numeric'; i.maxLength = 4; i.size = 6; i.placeholder = curY || 'none yet'; i.value = S.mod.storeYears.get(s.xml) || '';
+        i.setAttribute('aria-label', 'Year' + (curY ? ` (now ${curY})` : ''));
+        i.oninput = () => { i.value = i.value.replace(/\D/g, ''); const v = i.value; if (v) S.mod.storeYears.set(s.xml, v); else S.mod.storeYears.delete(s.xml); i.classList.toggle('bad', !!v && v.length !== 4); updateChanges(); };
+        w.appendChild(i); if (curY) { const k = document.createElement('span'); k.className = 'muted'; k.textContent = 'now ' + curY; w.appendChild(k); } meta.appendChild(w);
+      }
       // your own shop tile (vehicles) or build-menu tab (buildings)
       if (APP) { const placeable = Core.isPlaceableXml(t), w = document.createElement('label'); w.className = 'metafield'; const sel = document.createElement('select');
         if (placeable) { const b = Core.brushOf(t); w.append(document.createTextNode('Build menu ')); sel.add(new Option(b ? `Keep (${b.category}${b.tab ? ' → ' + b.tab : ''})` : 'Keep', ''));
