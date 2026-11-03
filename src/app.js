@@ -73,6 +73,7 @@ function initSettings() {
   $('hd').addEventListener('change', () => { store.set('hd', hdOn() ? '1' : '0'); if (S.current) syncEditor(); });
   $('backup').addEventListener('change', () => store.set('backup', $('backup').checked ? '1' : '0'));
   const DEF = window.FDS_DEFAULTS || {}, pref = (k, d) => { const v = store.get(k); return v == null ? d : v; };
+  if (!store.get('brandReset1')) { try { localStorage.removeItem('brandOn'); } catch (e) {} store.set('brandReset1', '1'); } // brand-everything is now off unless you turn it on
   $('copyTag').value = pref('copyTag', DEF.copyTag || 'MY');
   $('saveCopyDefault').checked = pref('saveCopy', DEF.saveCopy ? '1' : '0') === '1'; $('saveCopy').checked = $('saveCopyDefault').checked;
   $('replaceOrig').checked = pref('replaceOrig', DEF.replaceOrig ? '1' : '0') === '1';
@@ -128,7 +129,96 @@ async function loadModsFolder() {
     d.textContent = /ENOENT/.test(e.message) ? 'There’s no mods folder at this location yet. Use Change folder to point at the folder where FS25 keeps your mods, or open a mod zip directly.' : 'This folder couldn’t be read (' + cleanErr(e) + '). Use Change folder to pick another one.';
     $('modGrid').appendChild(d); return; }
   S.mods = list; try { S.originals = await APP.listOriginals(); } catch (e) { S.originals = []; } renderModGrid(); scanEdited();
+  $('btnCheckMods').hidden = !APP.modCheckData || !S.mods.length;
 }
+/* ---- mod check: problems the game trips over, from the mods themselves and from the game's log; fixes only when you tick them ---- */
+const CHECK = { results: [], dupes: [], log: null, running: false };
+function xmlProblem(text) { // what the game's XML reader would complain about, or null
+  const d = new DOMParser().parseFromString(text, 'application/xml'), e = d.getElementsByTagName('parsererror')[0];
+  return e ? (e.textContent || 'XML error').replace(/\s+/g, ' ').replace(/^.*?error[^:]*:\s*/i, '').trim() : null;
+}
+const wellFormedXml = t => /^\s*(<\?xml[^>]*>\s*)?<i3D\b/.test(t) ? null : xmlProblem(t); // the exporter writes i3d files; only hand-edited XML goes wrong
+async function checkOne(m, installed) {
+  const data = await APP.modCheckData(m.path); if (!data || data.error) return { mod: m, error: data ? data.error : 'unreadable', problems: [] };
+  const r = ModCheck.analyze({ name: m.name, names: data.names, texts: data.texts }, { wellFormed: wellFormedXml, installed });
+  const mdName = data.names.find(n => /(^|\/)moddesc\.xml$/i.test(n));
+  return { mod: m, prefix: r.prefix, problems: r.problems, names: data.names.length, modDesc: mdName ? data.texts[mdName] || '' : '' };
+}
+async function runCheck(only) {
+  if (CHECK.running) return; CHECK.running = true; $('checkDlg').hidden = false; $('checkFix').disabled = true; $('checkBody').innerHTML = '';
+  const zips = S.mods.filter(m => m.kind === 'zip' && (!only || only.includes(m.path)));
+  const installed = new Set(S.mods.map(m => m.name.replace(/\.zip$/i, '').toLowerCase()));
+  const out = only ? CHECK.results.filter(r => !only.includes(r.mod.path)) : [];
+  for (let i = 0; i < zips.length; i++) {
+    $('checkWhat').textContent = `Checking ${i + 1} of ${zips.length}: ${zips[i].title || zips[i].name}…`; await tick();
+    try { out.push(await checkOne(zips[i], installed)); } catch (e) { out.push({ mod: zips[i], error: cleanErr(e), problems: [] }); }
+  }
+  CHECK.results = out.sort((a, b) => (a.mod.title || a.mod.name).localeCompare(b.mod.title || b.mod.name));
+  CHECK.dupes = ModCheck.duplicates(out.filter(r => !r.error).map(r => Object.assign({}, r.mod, { names: { length: r.names }, modDesc: r.modDesc })), copyTag());
+  try { const lg = await APP.readGameLog(); CHECK.log = lg && !lg.error ? { mtime: lg.mtime, byMod: ModCheck.parseLog(lg.text, installed) } : null; } catch (e) { CHECK.log = null; }
+  CHECK.running = false; drawCheck();
+}
+function drawCheck() {
+  const body = $('checkBody'); body.innerHTML = '';
+  const item = (cls, ico, html, box) => { const d = document.createElement('div'); d.className = 'checkitem ' + cls; d.innerHTML = `<span class="ico">${ico}</span><div></div>`; if (box) d.querySelector('.ico').replaceWith(box); d.querySelector('div').append(...html); return d; };
+  const txt = s => document.createTextNode(s);
+  let nProb = 0, nFix = 0, nLog = 0;
+  // the same mod twice
+  for (const g of CHECK.dupes) {
+    const card = document.createElement('div'); card.className = 'checkmod'; const h = document.createElement('h3'); h.textContent = g.keep.title || g.keep.name; card.appendChild(h);
+    card.appendChild(item('warn', '!', [txt(g.msg + ' Keep '), Object.assign(document.createElement('b'), { textContent: g.keep.name }), txt(' and move ' + g.drop.map(d => d.name).join(', ') + ' to Original mods? Savegames that used ' + (g.drop.length === 1 ? 'it' : 'them') + ' are switched to the one you keep.')]));
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn small'; b.textContent = 'Keep ' + g.keep.name.replace(/\.zip$/i, '') + ', move the other' + (g.drop.length === 1 ? '' : 's');
+    b.onclick = async () => { b.disabled = true; const msgs = [];
+      for (const d of g.drop) { try { const r = await APP.replaceOriginal({ oldPath: d.path, oldName: d.name.replace(/\.zip$/i, ''), newName: g.keep.name.replace(/\.zip$/i, '') });
+        msgs.push(r.error === 'game-running' ? 'Close the game first.' : r.error ? d.name + ': ' + r.error : r.movedTo ? `${d.name} moved${r.savegames.length ? ', ' + r.savegames.length + ' savegame' + (r.savegames.length === 1 ? '' : 's') + ' switched' : ''}.` : `${d.name} stays: ${(r.dependents || []).join(', ')} need${(r.dependents || []).length === 1 ? 's' : ''} it.`); } catch (e) { msgs.push(d.name + ': ' + cleanErr(e)); } }
+      toast(msgs.join(' ')); await loadModsFolder(); CHECK.dupes = CHECK.dupes.filter(x => x !== g); drawCheck(); };
+    card.appendChild(b); body.appendChild(card); nProb++;
+  }
+  for (const r of CHECK.results) {
+    const logs = CHECK.log ? CHECK.log.byMod.get(r.mod.name.replace(/\.zip$/i, '').toLowerCase()) || [] : [];
+    if (!r.problems.length && !r.error && !logs.length) continue;
+    const card = document.createElement('div'); card.className = 'checkmod'; const h = document.createElement('h3'); h.textContent = r.mod.title || r.mod.name; const sm = document.createElement('small'); sm.textContent = r.mod.name; h.appendChild(sm); card.appendChild(h);
+    if (r.error) card.appendChild(item('err', '×', [txt('This zip couldn’t be read: ' + r.error + '. It may be damaged: download it again.')]));
+    for (const p of r.problems) {
+      nProb++; let box = null;
+      if (p.fix) { nFix++; box = document.createElement('input'); box.type = 'checkbox'; box.checked = !!p.ticked; box.setAttribute('aria-label', 'Fix this'); box.onchange = () => { p.ticked = box.checked; $('checkFix').disabled = !CHECK.results.some(x => x.problems.some(q => q.ticked)); }; }
+      card.appendChild(item(p.kind === 'dependency' || p.kind === 'missing' || p.kind === 'nomoddesc' ? 'err' : 'warn', p.fix ? '' : '!', [txt(p.msg + (p.fix ? ' Tick to fix.' : ''))], box));
+    }
+    if (logs.length) { nLog += logs.length; const kinds = [...new Set(logs.map(l => l.kind))], lg = document.createElement('div'); lg.className = 'checklog';
+      lg.appendChild(txt(`From the game’s log (${logs.length} message${logs.length === 1 ? '' : 's'}). ` + kinds.map(k => ModCheck.LOG_HELP[k]).filter(Boolean).join(' ')));
+      for (const l of logs.slice(0, 4)) { const c = document.createElement('code'); c.textContent = l.msg.slice(0, 300); lg.appendChild(c); }
+      if (logs.length > 4) lg.appendChild(txt(`…and ${logs.length - 4} more.`)); card.appendChild(lg); }
+    body.appendChild(card);
+  }
+  const n = CHECK.results.length;
+  $('checkWhat').textContent = (nProb || nLog ? `Checked ${n} mod${n === 1 ? '' : 's'}: ${nProb} problem${nProb === 1 ? '' : 's'}${nFix ? `, ${nFix} the app can fix` : ''}${nLog ? `, and ${nLog} message${nLog === 1 ? '' : 's'} in the game’s log` : ''}.` : `Checked ${n} mod${n === 1 ? '' : 's'}: no problems found.`) +
+    (CHECK.log ? ` The log is from ${new Date(CHECK.log.mtime).toLocaleString()} (the last time you played).` : ' No game log found yet: play once, then check again to include it.');
+  if (!body.children.length) body.innerHTML = '<div class="empty">Everything looks fine.</div>';
+  $('checkFix').disabled = !CHECK.results.some(x => x.problems.some(q => q.ticked));
+}
+$('btnCheckMods').onclick = () => runCheck();
+$('checkAgain').onclick = () => runCheck();
+$('checkClose').onclick = () => { $('checkDlg').hidden = true; };
+$('checkFix').onclick = async () => {
+  if (APP.gameRunning && await APP.gameRunning()) { toast('Close the game first: it keeps mods open while it runs.'); return; }
+  const todo = CHECK.results.filter(r => r.problems.some(p => p.ticked)); $('checkFix').disabled = true; const done = [], failed = [];
+  for (const r of todo) {
+    try {
+      $('checkWhat').textContent = `Fixing ${r.mod.title || r.mod.name}…`; await tick();
+      const z = await JSZip.loadAsync(await APP.readFile(r.mod.path)), texts = {};
+      for (const n of Object.keys(z.files)) if (/\.(xml|i3d)$/i.test(n) && !z.files[n].dir) texts[n] = await z.file(n).async('string');
+      const { write, move } = ModCheck.applyFixes({ texts }, r.prefix, r.problems.filter(p => p.ticked));
+      for (const [k, v] of write) z.file(k, v);
+      let out = z;
+      if (move) { out = new JSZip(); for (const n of Object.keys(z.files)) { const f = z.files[n]; if (f.dir) continue; out.file(n.startsWith(move) ? n.slice(move.length) : n, await f.async('uint8array')); } }
+      const data = new Uint8Array(await (await out.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })).arrayBuffer());
+      const dir = r.mod.path.replace(/[\\/][^\\/]+$/, ''), w = await APP.writeNewZip({ dir, name: r.mod.path.slice(dir.length + 1), data, overwrite: true, backup: true });
+      if (!w || !w.saved) throw new Error('not saved'); done.push(r.mod.path);
+    } catch (e) { failed.push((r.mod.title || r.mod.name) + ' (' + cleanErr(e) + ')'); }
+  }
+  toast(`Fixed ${done.length} mod${done.length === 1 ? '' : 's'}.` + (failed.length ? ' Not fixed: ' + failed.join(', ') : ''));
+  await runCheck(done); // look at the fixed ones again
+};
 /* ---- edited mods still using their ModHub name (the game asks to "update" them) ---- */
 async function scanEdited() {
   if (!APP || !APP.scanEdited || !S.modsDir) return;
@@ -309,7 +399,7 @@ async function loadMod(zip, name, path, kind) {
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
   if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null; weldCache = new Map(); partCache = new Map();
-  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), shopLogos: new Map() };
+  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), storeBrands: new Map(), storeYears: new Map(), shopLogos: new Map() };
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);
@@ -820,7 +910,25 @@ function renamePlan() { // what will change: Map(xml -> { sets: Map(tag -> Map(i
   for (const g of M.analysis.groups) { if (seen.has(g.xml + '|' + g.tag)) continue; seen.add(g.xml + '|' + g.tag);
     for (const c of choiceNames(g)) { const v = (c.value || '').trim(); if (v && v !== c.original) { const e = at(g.xml); if (!e.sets.has(g.tag)) e.sets.set(g.tag, new Map()); e.sets.get(g.tag).set(c.it.index, v); } } }
   for (const [xml, name] of M.storeNames) { const cur = (storeItems().find(s => s.xml === xml) || {}).name; if (name.trim() && cur && name.trim() !== cur.text) at(xml).store = name.trim(); }
+  // a brand or year only for items that have none
+  for (const [xml, b] of M.storeBrands || []) { const v = b.trim().toUpperCase(); if (v && !Core.storeBrandOf(xmlText(xml))) at(xml).brand = v; }
+  for (const [xml, y] of M.storeYears || []) { const v = String(y).trim(); if (/^\d{4}$/.test(v) && !Core.storeYearOf(xmlText(xml))) at(xml).year = v; }
   return out;
+}
+/* brands to offer: the game's own (with the game folder), the ones this mod uses, the generic one, and yours */
+const BRANDS = { game: null, dir: undefined };
+async function gameBrands() {
+  if (BRANDS.dir === GAME.dir) return BRANDS.game || []; BRANDS.dir = GAME.dir; const out = new Map();
+  for (const f of ['shared/brands.xml', 'store/brands.xml', 'shared/storeBrands.xml']) { const u8 = await gameFile(f); if (!u8) continue;
+    for (const m of new TextDecoder().decode(u8).matchAll(/<brand\b[^>]*\bname="([^"]+)"[^>]*>/g)) out.set(m[1].toUpperCase(), (m[0].match(/\btitle="([^"]+)"/) || [])[1] || m[1]); }
+  return (BRANDS.game = [...out]);
+}
+async function fillBrandNames(dl) {
+  const list = new Map([['LIZARD', 'Lizard (the game’s own no-name brand)']]);
+  for (const s of storeItems()) { try { const b = Core.storeBrandOf(xmlText(s.xml)); if (b) list.set(b.toUpperCase(), b); } catch (e) {} }
+  list.set(brandKey(), brandTitle() + ' (your brand)');
+  try { for (const [k, t] of await gameBrands()) if (!list.has(k)) list.set(k, t); } catch (e) {}
+  dl.innerHTML = ''; for (const [k, t] of list) { const o = document.createElement('option'); o.value = k; o.label = t; dl.appendChild(o); }
 }
 function renderOpts() {
   const box = $('optList'); box.innerHTML = ''; if (!S.mod) return;
@@ -829,13 +937,24 @@ function renderOpts() {
   const stores = storeItems();
   if (stores.length) {
     const sec = document.createElement('div'); sec.className = 'opts names';
-    sec.innerHTML = '<div class="opthead"><h3>Name in the shop</h3><span class="muted">What the shop calls each vehicle in this mod.</span></div>';
+    sec.innerHTML = '<div class="opthead"><h3>Name in the shop</h3><span class="muted">What the shop calls each vehicle in this mod. Items without a brand or year can be given one; the ones they already have stay as they are.</span></div><datalist id="brandNames"></datalist>';
+    fillBrandNames(sec.querySelector('#brandNames'));
     for (const s of stores) {
       const row = document.createElement('label'), inp = document.createElement('input'); row.className = 'namerow';
       row.innerHTML = '<span class="mono muted"></span>'; row.firstChild.textContent = s.xml;
       inp.type = 'text'; inp.value = S.mod.storeNames.get(s.xml) ?? s.name.text; inp.setAttribute('aria-label', 'Shop name for ' + s.xml);
       inp.oninput = () => { if (inp.value.trim() && inp.value.trim() !== s.name.text) S.mod.storeNames.set(s.xml, inp.value); else S.mod.storeNames.delete(s.xml); updateChanges(); };
       row.appendChild(inp); sec.appendChild(row);
+      // brand and year: shown when the item has them, editable only when it doesn't
+      let t = ''; try { t = xmlText(s.xml); } catch (e) {}
+      const meta = document.createElement('div'), curB = Core.storeBrandOf(t), curY = Core.storeYearOf(t); meta.className = 'metarow';
+      const field = (label, cur, map, opts) => { const w = document.createElement('label'); w.className = 'metafield'; w.append(document.createTextNode(label + ' '));
+        if (cur) { const b = document.createElement('b'); b.textContent = cur; w.appendChild(b); }
+        else { const i = document.createElement('input'); i.type = 'text'; const { list, ...rest } = opts; Object.assign(i, rest); if (list) i.setAttribute('list', list); i.value = map.get(s.xml) || ''; i.oninput = () => { const v = i.value.trim(); if (v) map.set(s.xml, v); else map.delete(s.xml); updateChanges(); }; w.appendChild(i); }
+        meta.appendChild(w); };
+      field('Brand', curB, S.mod.storeBrands, { placeholder: 'none yet: add one', size: 18, list: 'brandNames' });
+      field('Year', curY, S.mod.storeYears, { placeholder: 'none yet', inputMode: 'numeric', maxLength: 4, size: 6 });
+      sec.appendChild(meta);
     }
     box.appendChild(sec);
   }
@@ -1701,7 +1820,7 @@ function plan() {
   const pic = S.mod.shopPics ? [...S.mod.shopPics.keys()] : [];
   return { tex, grp, txt, stk, ren, pla, pic };
 }
-function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += e.store ? 1 : 0; for (const m of e.sets.values()) n += m.size; } return n; }
+function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += (e.store ? 1 : 0) + (e.brand ? 1 : 0) + (e.year ? 1 : 0); for (const m of e.sets.values()) n += m.size; } return n; }
 function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren) + p.pla.length + (p.pic || []).length; }
 function updateChanges() {
   if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames + p.pla.length + p.pic.length;
@@ -1789,7 +1908,7 @@ async function saveMod() {
       const r = Core.decodeDDS(M.files.get(path)), f = ed.mode === 'hide' || ed.mode === 'paint' ? 1 : hdFactor(r.width, r.height), W = r.width * f, H = r.height * f;
       changed.push({ rel: path, data: Core.encodeDDS(composite(upscale(r.rgba, r.width, r.height, f), W, H, ed), W, H, quality()) });
     }
-    const textOut = new Map(txt);
+    const textOut = new Map(txt); let wantBrandMod = false;
     const byXml = new Map(); for (const g of grp) { if (!byXml.has(g.xml)) byXml.set(g.xml, []); byXml.get(g.xml).push(g); }
     for (const xml of ren.keys()) if (!byXml.has(xml)) byXml.set(xml, []);
     for (const [xml, gs] of byXml) {
@@ -1808,7 +1927,8 @@ async function saveMod() {
       }
       // renames last: new choices go at the end of a set, so the existing choices keep their positions
       const rn = ren.get(xml);
-      if (rn) { for (const [tag, m] of rn.sets) src = Core.renameConfigItems(src, tag, m); if (rn.store) src = Core.setStoreName(src, rn.store); }
+      if (rn) { for (const [tag, m] of rn.sets) src = Core.renameConfigItems(src, tag, m); if (rn.store) src = Core.setStoreName(src, rn.store);
+        if (rn.brand) { src = Core.setStoreBrand(src, rn.brand); if (rn.brand === brandKey()) wantBrandMod = true; } if (rn.year) src = Core.setStoreYear(src, rn.year); }
       textOut.set(xml, src);
     }
     // stickers: new geometry + material + texture per model file
@@ -1850,6 +1970,7 @@ async function saveMod() {
     if (asCopy) { const md = modDescPath(); if (md && !textOut.has(md)) textOut.set(md, Core.tagModTitle(xmlText(md), copyTag())); else if (md) textOut.set(md, Core.tagModTitle(textOut.get(md), copyTag())); }
     let branded = 0;
     if (asCopy && brandActive()) branded = brandTexts(k => textOut.get(k) || xmlText(k), (k, v) => textOut.set(k, v), [...M.files.keys()], modDescPath());
+    if (wantBrandMod) { const md = modDescPath(); if (md) textOut.set(md, Core.addDependency(textOut.get(md) || xmlText(md), brandModName())); branded = branded || 1; } // your brand on an item that had none: it needs the brand mod
     for (const [rel, s] of textOut) { const raw = M.files.get(rel) || await z.file(P + rel).async('uint8array'); const bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF; changed.push({ rel, data: new TextEncoder().encode((bom ? '﻿' : '') + s) }); }
 
     let result;

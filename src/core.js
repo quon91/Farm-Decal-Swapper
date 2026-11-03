@@ -681,6 +681,20 @@ function setStoreBrand(src, brand) {
     block = block.replace(/(<\/name>)/, `$1${nl}${ind}<brand>${escText(brand)}</brand>`); if (!block.includes('<brand>')) block = block.replace('<storeData>', `<storeData>${nl}${ind}<brand>${escText(brand)}</brand>`); }
   return src.slice(0, sd.index) + block + src.slice(sd.index + sd[0].length);
 }
+/** The brand and year a shop item already has (storeData <brand>, <specs><year>), or ''. */
+function storeBrandOf(src) { const sd = (src.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0]; return ((sd.match(/<brand>\s*([^<]*?)\s*<\/brand>/) || [])[1] || '').trim(); }
+function storeYearOf(src) { const sd = (src.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0]; return ((sd.match(/<specs>[\s\S]*?<year>\s*([^<]*?)\s*<\/year>/) || [])[1] || '').trim(); }
+/** Give a shop item a year (storeData <specs><year>), adding <specs> when it has none. */
+function setStoreYear(src, year) {
+  const sd = src.match(/<storeData>[\s\S]*?<\/storeData>/); if (!sd) return src;
+  const nl = src.includes('\r\n') ? '\r\n' : '\n', ind = ((sd[0].match(/\n([ \t]*)<name>/) || [])[1]) || '        ';
+  let block = sd[0];
+  if (/<specs>[\s\S]*?<year>[\s\S]*?<\/year>/.test(block)) block = block.replace(/(<specs>[\s\S]*?<year>)[\s\S]*?(<\/year>)/, `$1${escText(year)}$2`);
+  else if (/<specs>/.test(block)) block = block.replace(/<specs>/, `<specs>${nl}${ind}    <year>${escText(year)}</year>`);
+  else if (/<specs\s*\/>/.test(block)) block = block.replace(/<specs\s*\/>/, `<specs>${nl}${ind}    <year>${escText(year)}</year>${nl}${ind}</specs>`);
+  else block = block.replace(/(\r?\n?[ \t]*)<\/storeData>$/, `${nl}${ind}<specs>${nl}${ind}    <year>${escText(year)}</year>${nl}${ind}</specs>$1</storeData>`);
+  return src.slice(0, sd.index) + block + src.slice(sd.index + sd[0].length);
+}
 /** Make a mod depend on another (so the game loads that one first). */
 function addDependency(modDesc, name) {
   if (new RegExp('<dependency>\\s*' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*</dependency>').test(modDesc)) return modDesc;
@@ -954,7 +968,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { normPath, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { normPath, storeBrandOf, storeYearOf, setStoreYear, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

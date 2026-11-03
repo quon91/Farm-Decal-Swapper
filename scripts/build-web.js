@@ -15,7 +15,7 @@ html = html.replace('<link rel="stylesheet" href="styles.css">', () => '<style>\
 html = html.replace('<script src="vendor/jszip.min.js"></script>', () => jszip === 'cdn' ? '<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>' : '<script>' + esc(src('vendor/jszip.min.js')) + '</script>');
 html = html.replace('<script src="vendor/three.min.js"></script>', () => jszip === 'cdn' ? '<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>' : '<script>' + esc(src('vendor/three.min.js')) + '</script>');
 html = html.replace('<script src="vendor/three-mesh-bvh.min.js"></script>', () => '<script>' + esc(src('vendor/three-mesh-bvh.min.js')) + '</script>');
-for (const f of ['tables.js', 'core.js', 'viewer.js', 'lmfonts.js', 'logomaker.js', 'app.js']) html = html.replace(`<script src="${f}"></script>`, () => '<script>\n' + esc(src(f)) + '\n</script>');
+for (const f of ['tables.js', 'core.js', 'viewer.js', 'lmfonts.js', 'logomaker.js', 'modcheck.js', 'app.js']) html = html.replace(`<script src="${f}"></script>`, () => '<script>\n' + esc(src(f)) + '\n</script>');
 html = html.replace('<script src="seed.js"></script>', () => '<script>\n' + esc(seed) + '\n</script>');
 if (flag('--fragment')) { // page body only: for hosts that add their own document skeleton
   html = html.replace(/^[\s\S]*?<head>\n?/, '').replace(/<meta charset="utf-8">\n?/, '').replace(/<meta name="viewport"[^>]*>\n?/, '').replace('</head>\n<body>\n', '').replace(/<\/body>\n<\/html>\n?$/, '');

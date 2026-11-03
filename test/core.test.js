@@ -97,4 +97,13 @@ test('licence plates: game plate spots are found through i3d mappings, and can b
   assert.ok(!off.includes('<licensePlate') && off.includes('<i3dMapping id="plateBack"') && Core.licensePlateSpots(off).length === 0);
   assert.strictEqual(Core.removeLicensePlates('<vehicle>\n</vehicle>'), '<vehicle>\n</vehicle>');
 });
+test('shop items: a year goes in storeData specs, brand and year read back', () => {
+  const v = '<vehicle>\n    <storeData>\n        <name>Truck</name>\n        <price>100</price>\n    </storeData>\n</vehicle>';
+  const o = Core.setStoreYear(Core.setStoreBrand(v, 'LIZARD'), '1998');
+  assert.strictEqual(Core.storeYearOf(o), '1998'); assert.strictEqual(Core.storeBrandOf(o), 'LIZARD');
+  assert.ok(/<specs>\s*<year>1998<\/year>\s*<\/specs>\s*<\/storeData>/.test(o));
+  assert.strictEqual(Core.storeYearOf(Core.setStoreYear(o, '2001')), '2001');
+  const w = Core.setStoreYear('<vehicle><storeData><name>x</name><specs><power>100</power></specs></storeData></vehicle>', '1990');
+  assert.ok(w.includes('<year>1990</year>') && w.includes('<power>100</power>') && (w.match(/<specs>/g) || []).length === 1);
+});
 console.log(`\n${n} tests passed`);

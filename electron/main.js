@@ -194,6 +194,19 @@ ipcMain.handle('gameDataDir', async (_e, dir) => {
   for (const t of tries) { const g = gameDataFrom(t); if (g) return g; }
   return null;
 });
+/* ---- mod check: what's inside a mod (names, sizes, and its XML/i3d text), and the game's log ---- */
+ipcMain.handle('modCheckData', async (_e, file) => {
+  const names = [], texts = {};
+  try {
+    const got = await readZipEntries(file, n => { if (!n.endsWith('/')) names.push(n); return /\.(xml|i3d)$/i.test(n); });
+    for (const [k, v] of Object.entries(got)) texts[k] = v.toString('utf8');
+  } catch (e) { return { error: String(e.message || e) }; }
+  return { names, texts };
+});
+ipcMain.handle('readGameLog', async () => {
+  const p = path.join(GAME_DIR(), 'log.txt');
+  try { const st = await fsp.stat(p); const buf = await fsp.readFile(p); return { path: p, mtime: st.mtimeMs, text: buf.toString('utf8') }; } catch (e) { return { path: p, error: 'not found' }; }
+});
 ipcMain.handle('zipNames', async (_e, file) => { // names of a zip's logo files (custom_decals/...), without reading the zip
   const names = []; try { await readZipEntries(file, n => { if (/(^|\/)custom_decals\//i.test(n)) names.push(n); return false; }); } catch (e) { return null; } return names;
 });

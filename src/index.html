@@ -52,7 +52,7 @@
           <input type="search" id="modSearch" placeholder="Search mods" aria-label="Search mods">
           <div class="segs" id="modFilter" role="group" aria-label="Show"><button type="button" data-f="all">All <span></span></button><button type="button" data-f="mine">Your copies <span></span></button><button type="button" data-f="logos">With your logos <span></span></button><button type="button" data-f="plain">Not edited <span></span></button></div>
         </div>
-        <div class="row-wrap" style="margin:-4px 0 12px"><button type="button" class="btn small" id="btnFixMods" hidden>Fix “needs updating” mods</button></div>
+        <div class="row-wrap" style="margin:-4px 0 12px"><button type="button" class="btn small" id="btnFixMods" hidden>Fix “needs updating” mods</button><button type="button" class="btn small" id="btnCheckMods" hidden>Check my mods for problems</button></div>
         <div class="flagbar" id="flagBar" hidden><div><b id="flagTitle"></b><span class="muted" id="flagText"></span></div><button type="button" class="btn small primary" id="flagFix">Review and fix</button></div>
         <div class="modgrid" id="modGrid"></div>
       </div>
@@ -362,6 +362,15 @@
     <div class="edacts"><button type="button" class="btn primary" id="usesUpdate">Update these mods</button><button type="button" class="btn" id="usesScan">Look in my mods folder</button><button type="button" class="btn" id="usesClose">Close</button></div>
   </div>
 </div>
+<div class="overlay" id="checkDlg" hidden>
+  <div class="dlgbox checkbox" role="dialog" aria-modal="true" aria-labelledby="checkHead">
+    <div class="row-between"><h2 id="checkHead">Mod check</h2><button type="button" class="btn small" id="checkClose">Close</button></div>
+    <p class="muted" id="checkWhat"></p>
+    <div id="checkBody" class="checkbody"></div>
+    <p class="muted hint" id="checkNote">Nothing is changed until you tick a fix and click Fix the ticked problems. Each mod is backed up first (Documents\Farm Decal Swapper\Backups). A fixed ModHub mod no longer matches ModHub, so the game may say it needs updating: Fix “needs updating” mods turns it into your own copy.</p>
+    <div class="edacts"><button type="button" class="btn primary" id="checkFix" disabled>Fix the ticked problems</button><button type="button" class="btn" id="checkAgain">Check again</button></div>
+  </div>
+</div>
 <div class="overlay" id="importDlg" hidden>
   <div class="dlgbox" role="dialog" aria-modal="true" aria-labelledby="importHead">
     <h2 id="importHead">Import logo pack</h2>
@@ -449,6 +458,7 @@
 <script src="viewer.js"></script>
 <script src="lmfonts.js"></script>
 <script src="logomaker.js"></script>
+<script src="modcheck.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

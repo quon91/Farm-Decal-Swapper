@@ -349,3 +349,18 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .pickgrid button span{font-size:.78rem;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .pickgrid .libhead{grid-column:1/-1}
 .linkish{background:none;border:0;padding:0;font:inherit;font-size:.78rem;color:var(--accent);text-decoration:underline;cursor:pointer;align-self:flex-start}
+.checkbox{width:min(980px,100%);max-height:calc(100vh - 40px)}
+.checkbody{overflow:auto;max-height:62vh;display:flex;flex-direction:column;gap:12px}
+.checkmod{border:1px solid var(--line);border-radius:var(--r);background:var(--bg);padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.checkmod h3{margin:0;font-size:.95rem;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.checkmod h3 small{font-weight:400;color:var(--muted);font-size:.78rem}
+.checkitem{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;font-size:.86rem;align-items:start}
+.checkitem .ico{font-weight:700;text-align:center}
+.checkitem.err .ico{color:#b3261e}.checkitem.warn .ico{color:#a86800}.checkitem.ok .ico{color:#2e7d32}
+.checkitem code{font-size:.78rem;background:var(--surface);padding:1px 4px;border-radius:4px;word-break:break-all}
+.checklog{font-size:.78rem;color:var(--muted);border-left:3px solid var(--line);padding-left:8px;display:flex;flex-direction:column;gap:2px}
+.checklog code{white-space:pre-wrap;word-break:break-all}
+.metarow{display:flex;gap:16px;flex-wrap:wrap;margin:-4px 0 10px;padding-left:2px;font-size:.84rem;color:var(--muted)}
+.metafield{display:flex;align-items:center;gap:6px}
+.metafield b{color:var(--text,inherit);font-weight:600}
+.metafield input{border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:.25em .5em;font:inherit;width:auto}
