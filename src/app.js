@@ -73,7 +73,7 @@ function initSettings() {
   $('brandLogo').addEventListener('change', () => store.set('brandLogo', $('brandLogo').value));
   showCopyName();
   if (APP) {
-    $('setBackup').hidden = false; $('setFolder').hidden = false; $('btnFolder').hidden = false;
+    $('setBackup').hidden = false; $('setFolder').hidden = false; $('btnFolder').hidden = false; $('setGame').hidden = !APP.gameDataDir; setTimeout(() => findGameData(false), 0);
     APP.backupDir().then(p => $('backupPath').textContent = p);
     $('btnOpenBackups').onclick = () => APP.openPath('backups');
     $('replaceSet').hidden = false; $('brandSet').hidden = false; $('btnOpenOriginals').onclick = () => APP.openPath('originals');
@@ -209,6 +209,25 @@ document.querySelectorAll('#modFilter button').forEach(b => b.onclick = () => { 
 async function changeFolder() { const p = await APP.pickFolder(S.modsDir); if (p) { store.set('modsDir', p); loadModsFolder(); } }
 $('btnFolder').onclick = changeFolder; $('btnFolder2').onclick = changeFolder;
 $('btnFolderReset').onclick = () => { try { localStorage.removeItem('modsDir'); } catch (e) {} loadModsFolder(); };
+
+/* ---- the game's own files ($data/...), read only: base game wheels, hubs and textures ---- */
+const GAME = { dir: null, cache: new Map() };
+async function findGameData(force) {
+  if (!APP || !APP.gameDataDir) return null;
+  const saved = store.get('gameData');
+  GAME.dir = (!force && saved && await APP.gameDataDir(saved)) || await APP.gameDataDir(null);
+  if (GAME.dir) store.set('gameData', GAME.dir);
+  $('gamePath').textContent = GAME.dir ? GAME.dir : 'Not found. Click Choose game folder and pick the folder Farming Simulator 25 is installed in.';
+  return GAME.dir;
+}
+async function gameFile(rel) { // rel: the part after $data/
+  if (!GAME.dir || !APP.readGameFile) return null; const k = rel.toLowerCase();
+  if (!GAME.cache.has(k)) { if (GAME.cache.size > 300) GAME.cache.clear(); GAME.cache.set(k, APP.readGameFile(GAME.dir, rel).catch(() => null)); }
+  return GAME.cache.get(k);
+}
+$('btnGameDir').onclick = async () => { const p = await APP.pickFolder(GAME.dir || '', 'Choose the folder Farming Simulator 25 is installed in'); if (!p) return;
+  const d = await APP.gameDataDir(p); if (!d) { toast('That folder doesn’t look like the game folder (no data\\shared inside).'); return; } GAME.dir = d; store.set('gameData', d); $('gamePath').textContent = d; toast('Game folder set.'); };
+$('btnGameFind').onclick = async () => { const d = await findGameData(true); toast(d ? 'Found the game folder.' : 'Couldn’t find it. Use Choose game folder.'); };
 
 /* ================= opening a mod ================= */
 const drop = $('drop');
@@ -881,6 +900,102 @@ function initPlace() {
   fillPlaceLogos(); loadModel(M.place.i3d);
 }
 $('placeModel').addEventListener('change', e => { S.mod.place.i3d = e.target.value; S.mod.place.sel = null; loadModel(e.target.value); });
+/* ---- the vehicle as the shop shows it: the parts its default choices show, and its wheels (from the mod or the game's files) ---- */
+const vec3 = (s, d) => s ? s.trim().split(/\s+/).map(Number) : d;
+async function anyFile(p) { // "wheels/x.i3d" from the mod, or "$data/..." from the game
+  if (!p) return null; if (/^\$data\//i.test(p)) return gameFile(p.slice(6));
+  const M = S.mod, hit = M.files.get(p) || M.files.get([...M.files.keys()].find(k => k.toLowerCase() === p.toLowerCase())); return hit || null;
+}
+function modRef(ref) { // a path as written in a mod XML: mod-relative, $moddir$..., or $data/...
+  if (!ref) return null; ref = ref.trim().replace(/\\/g, '/');
+  if (/^\$data\//i.test(ref)) return '$data/' + Core.normPath(ref.slice(6));
+  if (/^\$moddir\$/i.test(ref)) ref = ref.replace(/^\$moddir\$[^/]*\/?/i, '');
+  return ref.startsWith('$') ? null : Core.normPath(ref);
+}
+const lookCache = new Map();
+/* the game's named paints (material templates such as JOHNDEERE_GREEN1), read from the game folder when there is one */
+const TEMPLATES = { map: null, dir: undefined };
+async function loadTemplates() {
+  if (TEMPLATES.dir === GAME.dir) return TEMPLATES.map; TEMPLATES.dir = GAME.dir; const map = new Map();
+  for (const f of ['shared/materialTemplates.xml', 'shared/brandMaterialTemplates.xml', 'shared/materialTemplates/materialTemplates.xml']) {
+    const u8 = await gameFile(f); if (!u8) continue;
+    for (const m of new TextDecoder().decode(u8).matchAll(/<[A-Za-z]+\b[^>]*\bname="([^"]+)"[^>]*>/g)) {
+      const c = (m[0].match(/\b(?:colorScale|color|baseColor|diffuseColor)="([\d.\s-]+)"/) || [])[1]; if (c) map.set(m[1].toLowerCase(), vec3(c).slice(0, 3));
+    }
+  }
+  return (TEMPLATES.map = map);
+}
+async function partFile(p) { // an i3d with its shapes, read once
+  const k = (S.mod.name + '|' + p).toLowerCase(); if (lookCache.has(k)) return lookCache.get(k);
+  const job = (async () => { const t = await anyFile(p), sh = await anyFile(p + '.shapes'); if (!t || !sh) return null;
+    return { i3dPath: p, text: new TextDecoder().decode(t).replace(/^﻿/, ''), shapes: Core.readAllShapes(sh) }; })().catch(() => null);
+  lookCache.set(k, job); return job;
+}
+function defaultLook(i3d) {
+  const out = { vis: null, extras: Promise.resolve([]), wheels: 0 }, vs = vehiclesUsing(i3d); if (!vs.length) return out;
+  const P = partsOf(i3d), paths = Core.nodePaths(P.doc), byPath = new Map([...paths].map(([id, p]) => [p, id]));
+  const doc = Core.parseXML(xmlText(vs[0].xml)), veh = Core.find(doc, 'vehicle') || doc;
+  const maps = new Map(); for (const m of Core.findAll(veh, e => e.tag === 'i3dMapping')) maps.set(m.attrs.id, m.attrs.node);
+  const nodeOf = ref => { if (!ref) return null; const p = /^\d+>/.test(ref) ? ref : maps.get(ref); return p ? byPath.get(p) || null : null; };
+  // every choice in the shop starts on its default: its parts shown, the others' hidden
+  const vis = new Map(), slots = new Map(); // slots: material name -> { diffuse, color } the default choices give it
+  const apply = (oc, on) => { const id = nodeOf(oc.attrs.node); if (!id) return; const k = on ? 'Active' : 'Inactive', o = vis.get(id) || {};
+    if (oc.attrs['visibility' + k] != null) o.visibility = oc.attrs['visibility' + k] === 'true';
+    for (const t of ['translation', 'rotation', 'scale']) if (oc.attrs[t + k] != null) o[t] = vec3(oc.attrs[t + k]); vis.set(id, o); };
+  for (const set of Core.findAll(veh, e => /Configurations$/.test(e.tag))) {
+    const one = set.tag.replace(/s$/, ''), items = set.children.filter(c => c.tag === one); if (!items.length) continue;
+    const def = items.find(c => c.attrs.isDefault === 'true') || items[0], ocs = it => Core.findAll(it, e => e.tag === 'objectChange');
+    for (const it of items) if (it !== def) ocs(it).forEach(oc => apply(oc, false));
+    ocs(def).forEach(oc => apply(oc, true));
+    for (const m of Core.kids(def, 'material')) { const name = m.attrs.materialSlotName || m.attrs.slotName; if (!name) continue; const o = slots.get(name) || {};
+      const t = Core.kids(m, 'textures')[0], d = t && modRef(t.attrs.diffuse); if (d) o.diffuse = d; if (m.attrs.color && /^[\d.\s]+$/.test(m.attrs.color)) o.color = vec3(m.attrs.color).slice(0, 3); slots.set(name, o); }
+    const pc = def.attrs.color && /^[\d.\s]+$/.test(def.attrs.color) ? vec3(def.attrs.color).slice(0, 3) : def.attrs.materialTemplateName ? (TEMPLATES.map || new Map()).get(def.attrs.materialTemplateName.toLowerCase()) : null;
+    if (pc) for (const m of Core.kids(set, 'material')) { const name = m.attrs.materialSlotName; if (name) slots.set(name, Object.assign(slots.get(name) || {}, { color: pc })); } // a colour choice paints the set's slots
+  }
+  out.vis = vis; out.slots = slots;
+  const elOf = id => Core.findAll(P.doc, e => e.attrs && e.attrs.nodeId === id)[0];
+  const localOf = id => { const o = vis.get(id), el = elOf(id); if (!o || !el || !(o.translation || o.rotation || o.scale)) return null;
+    return Core.mat(o.translation || vec3(el.attrs.translation, [0, 0, 0]), o.rotation || vec3(el.attrs.rotation, [0, 0, 0]), o.scale || vec3(el.attrs.scale, [1, 1, 1])); };
+  // wheels of the default wheel choice
+  const wcs = Core.find(veh, 'wheelConfigurations'), items = wcs ? wcs.children.filter(c => c.tag === 'wheelConfiguration') : [];
+  const wc = items.find(c => c.attrs.isDefault === 'true') || items[0], wheelsEl = wc ? Core.find(wc, 'wheels') : Core.find(veh, 'wheels');
+  const wheels = wheelsEl ? wheelsEl.children.filter(c => c.tag === 'wheel') : []; out.wheels = wheels.length;
+  out.extras = (async () => {
+    const list = [], xmlCache = new Map();
+    const wheelXml = async ref => { const p = modRef(ref); if (!p) return null; if (!xmlCache.has(p)) xmlCache.set(p, anyFile(p).then(u8 => u8 ? Core.parseXML(new TextDecoder().decode(u8).replace(/^﻿/, '')) : null).catch(() => null)); return xmlCache.get(p); };
+    const PARTS = ['tire', 'outerRim', 'innerRim', 'additional'];
+    async function addWheel(file, configId, isLeft, own, anchorId, anchorLocal, inwardBase) {
+      const wx = await wheelXml(file), root = wx && (Core.find(wx, 'wheel') || wx); if (!root) return 0;
+      const def = Core.find(root, 'default'), conf = configId ? Core.findAll(root, e => e.tag === 'configuration' && e.attrs.id === configId)[0] : null;
+      const pick = (el, tag) => el ? Core.kids(el, tag)[0] : null, attrs = tag => Object.assign({}, (pick(def, tag) || {}).attrs, (pick(conf, tag) || {}).attrs, (own && pick(own, tag) || {}).attrs);
+      const width = +(attrs('physics').width || 0.4);
+      for (const tag of PARTS) {
+        const a = attrs(tag); if (!Object.keys(a).length) continue;
+        const nodeStr = (isLeft ? (a.nodeLeft || a.node) : (a.nodeRight || a.node)) || (tag.endsWith('Rim') ? '0|0' : null);
+        if (!a.filename || a.filename === '-' || !nodeStr || nodeStr === '-') continue;
+        const p = modRef(a.filename), f = p && await partFile(p); if (!f) continue;
+        const wd = a.widthAndDiam ? vec3(a.widthAndDiam) : null;
+        list.push({ i3dPath: f.i3dPath, text: f.text, shapes: f.shapes, nodePath: nodeStr, anchorId, anchorLocal, flip: !isLeft && !a.nodeRight, // a part made for the left is turned round for the right
+          scale: wd ? [wd[0] * 0.0254, wd[1] * 0.0254, wd[1] * 0.0254] : a.scale ? vec3(a.scale) : null, inward: inwardBase + (+a.offset || 0) });
+      }
+      return width;
+    }
+    for (const w of wheels) {
+      try {
+        const ph = Core.kids(w, 'physics')[0] || w, anchorId = nodeOf(ph.attrs.driveNode) || nodeOf(ph.attrs.repr); if (!anchorId) continue;
+        const left = w.attrs.isLeft === 'true', anchorLocal = localOf(anchorId);
+        const width = await addWheel(w.attrs.filename, w.attrs.configId, left, w, anchorId, anchorLocal, 0);
+        for (const aw of Core.kids(w, 'additionalWheel')) { // twin wheels: next to the main one, towards the middle
+          const aLeft = aw.attrs.isLeft != null ? aw.attrs.isLeft === 'true' : left, wx = await wheelXml(aw.attrs.filename || w.attrs.filename);
+          const r2 = wx && (Core.find(wx, 'wheel') || wx), d2 = r2 && Core.find(r2, 'default'), ph2 = d2 && Core.kids(d2, 'physics')[0], w2 = +((ph2 && ph2.attrs.width) || width || 0.4);
+          await addWheel(aw.attrs.filename || w.attrs.filename, aw.attrs.configId, aLeft, aw, anchorId, anchorLocal, (width || 0.4) / 2 + w2 / 2 + (+aw.attrs.offset || 0));
+        }
+      } catch (e) { console.warn('wheel', e); }
+    }
+    return list;
+  })();
+  return out;
+}
 let loadedModel = null, weldCache = new Map(), partCache = new Map();
 async function loadModel(i3d) {
   const M = S.mod; if (loadedModel === M.name + '|' + i3d && S.viewer) { drawStickers(); return; }
@@ -888,7 +1003,9 @@ async function loadModel(i3d) {
   try {
     const text = new TextDecoder().decode(M.files.get(i3d)).replace(/^﻿/, '');
     const shapes = partsOf(i3d).shapes;
-    await S.viewer.load({ i3dPath: i3d, text, shapes, files: M.files });
+    try { await loadTemplates(); } catch (e) {}
+    let look = { vis: null, extras: null, slots: null }; try { look = defaultLook(i3d); } catch (e) { console.warn(e); }
+    await S.viewer.load({ i3dPath: i3d, text, shapes, files: M.files, getFile: anyFile, vis: look.vis, extras: look.extras, slots: look.slots });
     loadedModel = M.name + '|' + i3d; st.hidden = true; drawStickers();
   } catch (e) { st.textContent = 'This model couldn’t be shown: ' + e.message; }
 }
@@ -1227,7 +1344,7 @@ function snapCompose(full) {
 function snapRender() { // re-render the model at the chosen size, without the orange selection outline
   if (!S.viewer) return; const [w, h] = $('snapSize').value.split('x').map(Number), sel = S.mod.place && S.mod.place.sel;
   if (sel) { S.mod.place.sel = null; drawStickers(); }
-  SNAP.shot = S.viewer.snapshotAt(w, h);
+  SNAP.shot = S.viewer.snapshotAt(w, h, { fit: $('snapFit').checked });
   if (sel) { S.mod.place.sel = sel; drawStickers(); }
   snapCompose(false);
 }
@@ -1236,9 +1353,30 @@ $('btnSnap').onclick = () => {
   for (const l of S.lib) { const o = document.createElement('option'); o.value = l.id; o.textContent = l.name; sel.appendChild(o); }
   sel.value = S.lib.some(l => l.id === cur) ? cur : (S.lib[0] ? S.lib[0].id : '');
   for (const k of ['snapSize', 'snapBg', 'snapScale', 'snapAlpha']) { const v = store.get(k); if (v) $(k).value = v; }
+  $('snapFit').checked = store.get('snapFit') === '1' || $('snapSize').value === '512x512';
+  const items = S.mod && S.mod.place ? storeItemsUsing(S.mod.place.i3d) : []; $('snapShop').hidden = !items.length;
+  $('snapShop').title = items.length ? 'Replaces the picture the shop shows for ' + items.map(i => i.name).join(', ') : '';
   $('snapDlg').hidden = false; snapRender();
 };
-for (const k of ['snapSize', 'snapBg']) $(k).addEventListener('change', () => { store.set(k, $(k).value); snapRender(); });
+for (const k of ['snapSize', 'snapBg']) $(k).addEventListener('change', () => { store.set(k, $(k).value);
+  if (k === 'snapSize' && $(k).value === '512x512') { $('snapBg').value = 'clear'; $('snapFit').checked = true; } // shop pictures: see-through, vehicle filling the frame
+  snapRender(); });
+$('snapFit').addEventListener('change', () => { store.set('snapFit', $('snapFit').checked ? '1' : '0'); snapRender(); });
+/* ---- shop picture: the snapshot becomes the store image of every shop item that uses this model ---- */
+function storeItemsUsing(i3d) {
+  const out = [];
+  for (const k of S.mod.files.keys()) { if (!/\.xml$/i.test(k) || /moddesc\.xml$/i.test(k)) continue; let t; try { t = xmlText(k); } catch (e) { continue; }
+    const f = (t.match(/<base>[\s\S]*?<filename>\s*([^<]+?)\s*<\/filename>/) || [])[1], img = (t.match(/<storeData>[\s\S]*?<image>\s*([^<]+?)\s*<\/image>/) || [])[1];
+    if (f && img && modRef(f) && modRef(f).toLowerCase() === i3d.toLowerCase()) out.push({ xml: k, image: img, name: (Core.storeName(t, texts()) || {}).text || baseName(k) }); }
+  return out;
+}
+function squareCanvas(src, n) { const c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d'), k = Math.min(n / src.width, n / src.height); g.imageSmoothingQuality = 'high'; g.drawImage(src, (n - src.width * k) / 2, (n - src.height * k) / 2, src.width * k, src.height * k); return c; }
+$('snapShop').onclick = () => {
+  const M = S.mod, items = storeItemsUsing(M.place.i3d); if (!items.length) return;
+  const pic = squareCanvas(snapCompose(true), 512); if (!M.shopPics) M.shopPics = new Map();
+  for (const it of items) M.shopPics.set(it.xml, pic);
+  updateChanges(); toast(`Shop picture set for ${items.map(i => i.name).join(', ')}. Save the mod to keep it.`);
+};
 for (const k of ['snapLogo', 'snapScale', 'snapAlpha', 'snapShadow']) $(k).addEventListener('input', () => { if (k !== 'snapShadow') store.set(k, $(k).value); snapCompose(false); });
 document.querySelectorAll('#snapPos button').forEach(b => b.onclick = () => { const p = b.dataset.p; SNAP.ax = p[1] === 'l' ? 0 : p[1] === 'r' ? 1 : 0.5; SNAP.ay = p[0] === 't' ? 0 : 1; SNAP.x = SNAP.ax === 0 ? 0.03 : SNAP.ax === 1 ? 0.97 : 0.5; SNAP.y = SNAP.ay === 0 ? 0.05 : 0.95; snapCompose(false); });
 (() => { const cv = $('snapCanvas'), pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * cv.width, (e.clientY - r.top) / r.height * cv.height]; };
@@ -1356,15 +1494,16 @@ function plan() {
   const txt = [...S.mod.textEdits.entries()];
   const stk = S.mod.stickers.filter(st => logoById(st.logo));
   const ren = renamePlan(), pla = S.mod.plates.filter(p => p.style === 'mine' || vehiclesUsing(p.i3d).length);
-  return { tex, grp, txt, stk, ren, pla };
+  const pic = S.mod.shopPics ? [...S.mod.shopPics.keys()] : [];
+  return { tex, grp, txt, stk, ren, pla, pic };
 }
 function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += e.store ? 1 : 0; for (const m of e.sets.values()) n += m.size; } return n; }
-function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren) + p.pla.length; }
+function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren) + p.pla.length + (p.pic || []).length; }
 function updateChanges() {
-  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames + p.pla.length;
+  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames + p.pla.length + p.pic.length;
   const nSt = p.stk.reduce((a, st) => a + 1 + (st.twin ? 1 : 0), 0);
   $('cntStickers').textContent = nSt || '';
-  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> name${nNames === 1 ? '' : 's'}`); if (p.pla.length) parts.push(`<b>${p.pla.length}</b> plate${p.pla.length === 1 ? '' : 's'}`);
+  const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> name${nNames === 1 ? '' : 's'}`); if (p.pla.length) parts.push(`<b>${p.pla.length}</b> plate${p.pla.length === 1 ? '' : 's'}`); if (p.pic.length) parts.push(`<b>${p.pic.length}</b> shop picture${p.pic.length === 1 ? '' : 's'}`);
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
 }
@@ -1492,6 +1631,15 @@ async function saveMod() {
         textOut.set(v.xml, Core.addSwitchConfig(src, v.slot, sh.title || 'Farm logo', options, maps));
         say(`Added the “${sh.title || 'Farm logo'}” choice to ${v.name}…`); await tick();
       }
+    }
+    // shop pictures: written over the store image the item already uses (or a new one if that is one of the game's)
+    for (const [xml, pic] of (M.shopPics || new Map())) {
+      const src = textOut.get(xml) || xmlText(xml), img = (src.match(/<storeData>[\s\S]*?<image>\s*([^<]+?)\s*<\/image>/) || [])[1]; if (!img) continue;
+      let rel = modRef(img); const own = rel && !rel.startsWith('$data/');
+      if (!own) { rel = `store_${Core.slug(baseName(xml).replace(/\.xml$/i, '')).toLowerCase()}.dds`; textOut.set(xml, src.replace(/(<storeData>[\s\S]*?<image>)\s*[^<]+?\s*(<\/image>)/, `$1${rel}$2`)); }
+      const g = pic.getContext('2d');
+      changed.push({ rel: Core.toDDS(rel), data: Core.encodeDDS(g.getImageData(0, 0, pic.width, pic.height).data, pic.width, pic.height, quality()) });
+      say(`Shop picture for ${baseName(xml)}…`); await tick();
     }
     const asCopy = savingCopy(), saveName = asCopy ? copyName(M.name) : M.name;
     if (M.kind !== 'folder') changed.push({ rel: 'farm_decal_swapper.txt', data: new TextEncoder().encode(`Edited with Farm Decal Swapper on ${new Date().toISOString().slice(0, 10)}.\r\nThis is not the original ModHub file. To get the original back, download it again from ModHub.\r\n`) });

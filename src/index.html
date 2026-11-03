@@ -264,6 +264,12 @@
           <p class="muted mono path" id="setModsPath"></p>
           <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small" id="btnFolder2">Change folder</button><button type="button" class="btn small" id="btnFolderReset">Use the default</button></div>
         </div>
+        <div class="set" id="setGame" hidden>
+          <h3>Game folder</h3>
+          <p class="muted">Most mods use the game’s own wheels, hubs and textures. With the game folder found, the 3D view and Snapshot show them too. The app only reads from it.</p>
+          <p class="muted mono path" id="gamePath"></p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small" id="btnGameDir">Choose game folder</button><button type="button" class="btn small" id="btnGameFind">Find it for me</button></div>
+        </div>
         <div class="set">
           <h3>About</h3>
           <p class="muted">Farm Decal Swapper <span id="appVer"></span>. Reads FS25 .i3d models and .i3d.shapes geometry, decodes and writes DDS textures. No GIANTS Editor or Blender needed.</p>
@@ -346,7 +352,8 @@
       <div class="head"><div style="min-width:0"><div class="eyebrow">Snapshot</div><h2 id="snapTitle" style="font-size:1.05rem">Picture with your logo</h2></div></div>
       <div class="field"><label for="snapSize">Picture size</label><select id="snapSize">
         <option value="1920x1080">1920 × 1080 · stream, YouTube thumbnail</option><option value="1280x720">1280 × 720</option>
-        <option value="1080x1080">1080 × 1080 · square post</option><option value="1080x1920">1080 × 1920 · phone, shorts</option><option value="3840x2160">3840 × 2160 · 4K</option></select></div>
+        <option value="1080x1080">1080 × 1080 · square post</option><option value="1080x1920">1080 × 1920 · phone, shorts</option><option value="3840x2160">3840 × 2160 · 4K</option><option value="512x512">512 × 512 · shop picture</option></select></div>
+      <label class="check"><input type="checkbox" id="snapFit"> <span>Fill the picture with the whole vehicle</span></label>
       <div class="field"><label for="snapBg">Background</label><select id="snapBg">
         <option value="sunset">Sunset</option><option value="field">Farm green</option><option value="studio">Light grey</option><option value="dark">Dark</option><option value="clear">See-through</option></select></div>
       <div class="field"><label for="snapLogo">Logo on the picture</label><select id="snapLogo"></select></div>
@@ -358,6 +365,7 @@
       <label class="check"><input type="checkbox" id="snapShadow" checked> <span>Soft shadow behind the logo</span></label>
       <div class="edacts" style="margin-top:auto">
         <button type="button" class="btn primary" id="snapSave">Save picture</button>
+        <button type="button" class="btn" id="snapShop" hidden>Use as the shop picture</button>
         <button type="button" class="btn" id="snapClose">Close</button>
       </div>
     </div>

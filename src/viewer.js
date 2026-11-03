@@ -45,11 +45,11 @@ function FDSViewer(canvas) {
     if (drag.pan) {
       const s = orbit.dist * 0.0018, right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
       orbit.target.addScaledVector(right, -dx * s).addScaledVector(up, dy * s);
-    } else { orbit.yaw -= dx * 0.008; orbit.pitch = Math.max(-1.5, Math.min(1.5, orbit.pitch + dy * 0.008)); }
+    } else { touched = true; orbit.yaw -= dx * 0.008; orbit.pitch = Math.max(-1.5, Math.min(1.5, orbit.pitch + dy * 0.008)); }
     placeCamera();
   });
   canvas.addEventListener('pointerup', e => { const d = drag; drag = null; canvas.style.cursor = ''; if (d && !d.moved && e.button === 0) click(e); if (d && d.sticker && d.dragged && onDragEnd) onDragEnd(d.sticker); });
-  canvas.addEventListener('wheel', e => { e.preventDefault(); orbit.dist = Math.max(0.2, Math.min(500, orbit.dist * Math.exp(e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
+  canvas.addEventListener('wheel', e => { e.preventDefault(); touched = true; orbit.dist = Math.max(0.2, Math.min(500, orbit.dist * Math.exp(e.deltaY * 0.0012))); placeCamera(); }, { passive: false });
 
   function ndc(e) { const r = canvas.getBoundingClientRect(); return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
   function stickerAt(e) { // id of the sticker under the pointer, if it isn't hidden behind the model
@@ -92,29 +92,46 @@ function FDSViewer(canvas) {
   function clear() {
     for (const m of meshes) { (Array.isArray(m.material) ? m.material : [m.material]).forEach(x => { if (x.map) x.map.dispose(); x.dispose(); }); }
     root.clear(); meshes = []; needs = true;
+    if (typeof extraGroup !== 'undefined') { extraGroup.traverse(o => { if (o.isMesh) { (Array.isArray(o.material) ? o.material : [o.material]).forEach(x => { if (x.map) x.map.dispose(); x.dispose(); }); } }); extraGroup.clear(); }
   }
-  /**
-   * opts: { i3dPath, text, shapes:Map(shapeId->geom), files:Map(path->Uint8Array), onStatus }
-   */
-  async function load(opts) {
-    clear();
-    const doc = Core.parseXML(opts.text), i3d = Core.find(doc, 'i3D') || doc;
+  /** A texture or model path as the game resolves it: mod-relative, or "$data/..." for the game's own files. */
+  function refPath(from, ref) {
+    if (!ref) return null; ref = ref.replace(/\\/g, '/');
+    if (/^\$data\//i.test(ref)) return '$data/' + Core.normPath(ref.slice(6));
+    if (ref.startsWith('$')) return null;
+    if (/^\$data\//.test(from)) return '$data/' + Core.normPath(Core.dirOf(from.slice(6)) + ref);
+    return Core.resolveRef(from, ref);
+  }
+  const vec = (s, d) => s ? s.trim().split(/\s+/).map(Number) : d;
+  const SCENE = ['Shape', 'TransformGroup', 'Light', 'Camera', 'Dynamic', 'AudioSource'];
+  /** Materials and shapes of one i3d file, and a builder that turns its nodes into 3D objects. */
+  const TIRE_YELLOW = '0.8 0.55 0.05'; // the vehicle shader's unset colour
+  function sceneOf(i3d, i3dPath, shapes, texJobs, slots) {
     const files = {}; for (const f of Core.findAll(i3d, e => e.tag === 'File')) files[f.attrs.fileId] = f.attrs.filename;
-    const mats = {}, texJobs = [];
+    const mats = {};
     for (const m of Core.findAll(i3d, e => e.tag === 'Material')) {
       const a = m.attrs, params = {}; for (const c of Core.kids(m, 'CustomParameter')) params[c.attrs.name] = c.attrs.value;
-      const tex = Core.kids(m, 'Texture')[0]; let color = null;
-      if (params.colorMat0) color = params.colorMat0.split(/\s+/).slice(0, 3).map(Number);
-      else if (params.colorScale) color = params.colorScale.split(/\s+/).slice(0, 3).map(Number); // FS25 vehicle shader
+      const tex = Core.kids(m, 'Texture')[0], slot = slots && slots.get(a.name); let color = null, tint = null;
+      if (params.colorMat0) { color = params.colorMat0.split(/\s+/).slice(0, 3).map(Number);
+        if (params.colorMat0.startsWith(TIRE_YELLOW) && /tire|tyre|rubber/i.test((a.customShaderVariation || '') + ' ' + (a.name || ''))) color = [0.03, 0.03, 0.03]; } // rubber
+      else if (params.colorScale) color = tint = params.colorScale.split(/\s+/).slice(0, 3).map(Number); // FS25 vehicle shader: tints the texture
       else if (a.diffuseColor) color = a.diffuseColor.split(/\s+/).slice(0, 3).map(Number);
-      const mat = new THREE.MeshLambertMaterial({ color: color ? new THREE.Color(color[0], color[1], color[2]).convertLinearToSRGB() : new THREE.Color(0.62, 0.64, 0.6), side: THREE.DoubleSide, transparent: a.alphaBlending === 'true', alphaTest: a.alphaBlending === 'true' ? 0.05 : 0 });
-      if (tex && !params.colorMat0) { const ref = files[tex.attrs.fileId]; const path = ref && !ref.startsWith('$') ? Core.toDDS(Core.resolveRef(opts.i3dPath, ref)) : null; if (path) texJobs.push({ mat, path }); }
+      // FS25: a plain texture with a detail material on top; rubber is black whatever the base texture says
+      const det = Core.kids(m, 'Custommap').find(c => c.attrs.name === 'detailDiffuse'), detName = det ? files[det.attrs.fileId] || '' : '';
+      if (!params.colorScale && !params.colorMat0 && /rubber/i.test(detName)) color = tint = [0.025, 0.025, 0.025];
+      if (slot && slot.color) color = tint = slot.color; // the shop's default colour for this paint slot
+      const lin = c => new THREE.Color(c[0], c[1], c[2]).convertLinearToSRGB();
+      const mat = new THREE.MeshLambertMaterial({ color: color ? lin(color) : new THREE.Color(0.62, 0.64, 0.6), side: THREE.DoubleSide, transparent: a.alphaBlending === 'true', alphaTest: a.alphaBlending === 'true' ? 0.05 : 0 });
+      mat.userData.tint = tint ? lin(tint) : null;
+      if (/mud|snow|dirt/i.test(files[a.customShaderId] || '')) mat.visible = false; // mud/snow shells only show when the vehicle is dirty
+      const texRef = slot && slot.diffuse ? slot.diffuse : tex && files[tex.attrs.fileId];
+      if (texRef && (!params.colorMat0 || (slot && slot.diffuse))) { const p = slot && slot.diffuse ? slot.diffuse : refPath(i3dPath, texRef); if (p) texJobs.push({ mat, path: Core.toDDS(p) }); }
       mats[a.materialId] = mat;
     }
     const geoCache = new Map();
     const geo = sid => {
       if (geoCache.has(sid)) return geoCache.get(sid);
-      const g = opts.shapes.get(sid); let bg = null;
+      const g = shapes.get(sid); let bg = null;
       if (g) {
         bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(g.pos, 3));
         if (g.uv) bg.setAttribute('uv', new THREE.BufferAttribute(g.uv, 2));
@@ -124,44 +141,94 @@ function FDSViewer(canvas) {
       }
       geoCache.set(sid, bg); return bg;
     };
-    const vec = (s, d) => s ? s.trim().split(/\s+/).map(Number) : d;
-    const walk = (el, parent) => {
-      for (const c of el.children) {
-        if (!['Shape', 'TransformGroup', 'Light', 'Camera', 'Dynamic', 'AudioSource'].includes(c.tag)) continue;
-        const a = c.attrs, M = Core.mat(vec(a.translation, [0, 0, 0]), vec(a.rotation, [0, 0, 0]), vec(a.scale, [1, 1, 1]));
-        let obj;
-        const helper = a.nonRenderable === 'true' || a.trigger === 'true' || (/(^|_)(col|collision|trigger)/i.test(a.name || '') && (a.kinematic === 'true' || a.static === 'true' || a.dynamic === 'true' || a.collisionMask || a.collisionFilterGroup));
-        if (c.tag === 'Shape' && a.shapeId && !helper && !a.skinBindNodeIds && geo(+a.shapeId)) {
-          const ids = (a.materialIds || '').split(',').map(x => x.trim()).filter(Boolean);
-          const ms = ids.map(id => mats[id] || new THREE.MeshLambertMaterial({ color: 0x999999, side: THREE.DoubleSide }));
-          obj = new THREE.Mesh(geo(+a.shapeId), ms.length > 1 ? ms : ms[0]);
-          obj.userData = { nodeId: a.nodeId, name: a.name || '' }; meshes.push(obj);
-        } else obj = new THREE.Group();
-        obj.matrixAutoUpdate = false; obj.matrix.fromArray(M); obj.visible = a.visibility !== 'false';
-        parent.add(obj); walk(c, obj);
-      }
+    /** One node (and everything under it) as 3D objects. pick: may stickers go on it; vis: visibility overrides by nodeId. */
+    const build = (c, parent, { pick, vis, out, byNode }) => {
+      const a = c.attrs, M = Core.mat(vec(a.translation, [0, 0, 0]), vec(a.rotation, [0, 0, 0]), vec(a.scale, [1, 1, 1]));
+      let obj;
+      const helper = a.nonRenderable === 'true' || a.trigger === 'true' || (/(^|_)(col|collision|trigger)/i.test(a.name || '') && (a.kinematic === 'true' || a.static === 'true' || a.dynamic === 'true' || a.collisionMask || a.collisionFilterGroup));
+      if (c.tag === 'Shape' && a.shapeId && !helper && geo(+a.shapeId)) {
+        const ids = (a.materialIds || '').split(',').map(x => x.trim()).filter(Boolean);
+        const ms = ids.map(id => mats[id] || new THREE.MeshLambertMaterial({ color: 0x999999, side: THREE.DoubleSide }));
+        obj = new THREE.Mesh(geo(+a.shapeId), ms.length > 1 ? ms : ms[0]);
+        // bendy parts (hoses, belts) are drawn in their resting shape; stickers don't go on them
+        obj.userData = { nodeId: pick && !a.skinBindNodeIds ? a.nodeId : null, name: a.name || '' }; out.push(obj);
+      } else obj = new THREE.Group();
+      obj.matrixAutoUpdate = false; obj.matrix.fromArray(M);
+      const ov = vis && a.nodeId && vis.get(a.nodeId); obj.visible = ov && ov.visibility != null ? ov.visibility : a.visibility !== 'false';
+      if (byNode && a.nodeId) byNode.set(a.nodeId, obj);
+      parent.add(obj);
+      for (const k of c.children) if (SCENE.includes(k.tag)) build(k, obj, { pick, vis, out, byNode });
+      return obj;
     };
-    const sc = Core.find(i3d, 'Scene'); if (sc) walk(sc, root);
+    return { build };
+  }
+  /** The node at an index path inside an i3d ("0|1|2", or "0>1|2"). */
+  function nodeAt(i3d, path) {
+    const sc = Core.find(i3d, 'Scene'); if (!sc || !path) return null;
+    const parts = String(path).replace('>', '|').split('|').filter(x => x !== '').map(Number); let el = sc;
+    for (const i of parts) { const kids = el.children.filter(k => SCENE.includes(k.tag)); el = kids[i]; if (!el) return null; }
+    return el === sc ? null : el;
+  }
+  const isVisible = o => { while (o) { if (!o.visible) return false; o = o.parent; } return true; };
+  let loadNo = 0, extraGroup = new THREE.Group(), touched = false; scene.add(extraGroup);
+  /**
+   * opts: { i3dPath, text, shapes:Map(shapeId->geom), files:Map(path->Uint8Array), getFile?(path) -> Promise<Uint8Array|null> (for "$data/..."),
+   *         vis?: Map(nodeId -> {visibility}) (parts the shop's default choices show or hide), extras?: Promise<[...]> (wheels and other parts from other files) }
+   */
+  async function load(opts) {
+    clear(); const token = ++loadNo; touched = false;
+    const doc = Core.parseXML(opts.text), i3d = Core.find(doc, 'i3D') || doc, texJobs = [], all = [], byNode = new Map();
+    const S0 = sceneOf(i3d, opts.i3dPath, opts.shapes, texJobs, opts.slots);
+    const sc = Core.find(i3d, 'Scene'); if (sc) for (const c of sc.children) if (SCENE.includes(c.tag)) S0.build(c, root, { pick: true, vis: opts.vis, out: all, byNode });
     root.updateMatrixWorld(true);
-    meshes = meshes.filter(m => { let o = m; while (o) { if (!o.visible) return false; o = o.parent; } return true; });
+    meshes = all.filter(m => m.userData.nodeId && isVisible(m));
     fit(); needs = true;
     if (BVH) { // a search tree per part, so clicks and drags don't test every triangle; built in small steps after the first frame
       const todo = [...new Set(meshes.map(m => m.geometry))];
       for (const m of meshes) m.raycast = BVH.acceleratedRaycast;
-      (async () => { let t = performance.now(); for (const g of todo) { if (disposed || !g.index) continue; try { const keep = g.index.array.slice(); g.boundsTree = new BVH.MeshBVH(g); g.userData.origIndex = keep; } catch (e) { console.warn(e); }
+      (async () => { let t = performance.now(); for (const g of todo) { if (disposed || token !== loadNo || !g.index) continue; try { const keep = g.index.array.slice(); g.boundsTree = new BVH.MeshBVH(g); g.userData.origIndex = keep; } catch (e) { console.warn(e); }
         if (performance.now() - t > 30) { await new Promise(r => setTimeout(r, 0)); t = performance.now(); } } })();
     }
-    // textures load after the first frame
-    for (const j of texJobs) {
-      if (disposed) return; const u8 = opts.files.get(j.path); if (!u8) continue;
-      await new Promise(r => setTimeout(r, 0));
-      const r = Core.decodeDDS(u8, { maxSize: 512 }); if (r.error) continue;
-      const c = document.createElement('canvas'); c.width = r.width; c.height = r.height; c.getContext('2d').putImageData(new ImageData(r.rgba, r.width, r.height), 0, 0);
-      const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 4; j.mat.map = t; j.mat.color.set(0xffffff); j.mat.needsUpdate = true; needs = true;
-    }
+    const getBytes = async p => /^\$data\//.test(p) ? (opts.getFile ? await opts.getFile(p) : null) : opts.files.get(p);
+    const loadTextures = async jobs => { // after the first frame
+      for (const j of jobs) {
+        if (disposed || token !== loadNo) return; let u8 = null; try { u8 = await getBytes(j.path); } catch (e) {} if (!u8) continue;
+        await new Promise(r => setTimeout(r, 0));
+        const r = Core.decodeDDS(u8, { maxSize: 512 }); if (r.error) continue;
+        const c = document.createElement('canvas'); c.width = r.width; c.height = r.height; c.getContext('2d').putImageData(new ImageData(r.rgba, r.width, r.height), 0, 0);
+        const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 4; j.mat.map = t; if (j.mat.userData.tint) j.mat.color.copy(j.mat.userData.tint); else j.mat.color.set(0xffffff); j.mat.needsUpdate = true; needs = true;
+      }
+    };
+    const texDone = loadTextures(texJobs);
+    // parts from other files (wheels): placed on a node of this model, never picked for stickers. Loads in the background.
+    if (opts.extras) (async () => {
+      let list = []; try { list = await opts.extras; } catch (e) { console.warn(e); }
+      if (token !== loadNo || disposed) return;
+      const jobs = [], scenes = new Map(), added = [];
+      for (const x of list) {
+        try {
+          const anchor = byNode.get(x.anchorId); if (!anchor || !isVisible(anchor)) continue;
+          if (!scenes.has(x.i3dPath)) { const d = Core.find(Core.parseXML(x.text), 'i3D'); scenes.set(x.i3dPath, { d, S: sceneOf(d, x.i3dPath, x.shapes, jobs) }); }
+          const { d, S } = scenes.get(x.i3dPath), el = nodeAt(d, x.nodePath); if (!el) continue;
+          // where the wheel sits: its node, moved as the default choice moves it, then along the axle
+          const W = new THREE.Matrix4().copy(anchor.parent.matrixWorld).multiply(x.anchorLocal ? new THREE.Matrix4().fromArray(x.anchorLocal) : anchor.matrix);
+          const pos = new THREE.Vector3().setFromMatrixPosition(W), inward = pos.x > 0 ? -1 : 1;
+          if (x.inward) W.premultiply(new THREE.Matrix4().makeTranslation(inward * x.inward, 0, 0));
+          const holder = new THREE.Group(); holder.matrixAutoUpdate = false; holder.matrix.copy(W); extraGroup.add(holder);
+          const part = S.build(el, holder, { pick: false, out: added });
+          const ps = vec(el.attrs.scale, [1, 1, 1]), sc2 = x.scale || ps;
+          part.matrix.copy(new THREE.Matrix4().compose(new THREE.Vector3(), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, x.flip ? Math.PI : 0, 0)), new THREE.Vector3(...sc2)));
+          part.visible = true;
+        } catch (e) { console.warn('extra part', e); }
+      }
+      extraGroup.updateMatrixWorld(true); needs = true;
+      if (!touched) fit();
+      await texDone; await loadTextures(jobs);
+    })().catch(e => console.warn(e));
   }
   function fit() {
     const box = new THREE.Box3(); for (const m of meshes) box.expandByObject(m);
+    extraGroup.traverse(o => { if (o.isMesh && isVisible(o)) box.expandByObject(o); }); // wheels too
     if (box.isEmpty()) return; const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length(); modelSize = s; modelCenter = c.toArray();
     orbit.target.copy(c); orbit.dist = s * 1.15; camera.near = Math.max(0.005, s / 2000); camera.far = s * 50; camera.updateProjectionMatrix(); placeCamera();
   }
@@ -230,11 +297,40 @@ function FDSViewer(canvas) {
     setBackground(c) { bg = c; needs = true; },
     snapshot() { renderer.render(scene, camera); return canvas.toDataURL('image/png'); },
     /** Render the current view at w×h with a see-through background; returns a 2D canvas. */
-    snapshotAt(w, h) {
+    snapshotAt(w, h, o = {}) { // o.fit: frame the whole model, as the shop picture does (same angle as the view)
       const pr = renderer.getPixelRatio(), cw = canvas.clientWidth, ch = canvas.clientHeight, oldBg = scene.background;
       renderer.setPixelRatio(1); renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
-      scene.background = null; renderer.setClearColor(0x000000, 0); renderer.render(scene, camera);
-      const out = document.createElement('canvas'); out.width = w; out.height = h; out.getContext('2d').drawImage(canvas, 0, 0, w, h);
+      const saved = { t: orbit.target.clone(), d: orbit.dist };
+      if (o.fit) {
+        const box = new THREE.Box3(); for (const m of meshes) box.expandByObject(m); extraGroup.traverse(x => { if (x.isMesh && isVisible(x)) box.expandByObject(x); });
+        root.traverse(x => { if (x.isMesh && isVisible(x) && !meshes.includes(x)) box.expandByObject(x); });
+        if (!box.isEmpty()) {
+          const pts = []; for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) pts.push(new THREE.Vector3(x, y, z));
+          orbit.target.copy(box.getCenter(new THREE.Vector3())); placeCamera();
+          const margin = o.margin || 0.9, th = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+          for (let i = 0; i < 4; i++) { // pull back or in until the box fills the frame, then centre it
+            camera.updateMatrixWorld(); let x0 = 1, x1 = -1, y0 = 1, y1 = -1;
+            for (const p of pts) { const q = p.clone().project(camera); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+            const ext = Math.max((x1 - x0) / 2, (y1 - y0) / 2), right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+            orbit.target.addScaledVector(right, (x0 + x1) / 2 * orbit.dist * th * camera.aspect).addScaledVector(up, (y0 + y1) / 2 * orbit.dist * th);
+            orbit.dist *= ext / margin; placeCamera();
+          }
+        }
+      }
+      scene.background = null; renderer.setClearColor(0x000000, 0);
+      const out = document.createElement('canvas'); out.width = w; out.height = h; const og = out.getContext('2d', { willReadFrequently: !!o.fit });
+      const shoot = () => { renderer.render(scene, camera); og.clearRect(0, 0, w, h); og.drawImage(canvas, 0, 0, w, h); };
+      shoot();
+      if (o.fit) for (let pass = 0; pass < 2; pass++) { // the box is bigger than the vehicle: measure what was drawn and frame that
+        const d = og.getImageData(0, 0, w, h).data; let x0 = w, x1 = -1, y0 = h, y1 = -1;
+        for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) if (d[(y * w + x) * 4 + 3] > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        if (x1 < 0) break;
+        const th = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2), right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0), up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+        const cx = ((x0 + x1) / 2 / w) * 2 - 1, cy = 1 - ((y0 + y1) / 2 / h) * 2, ext = Math.max((x1 - x0 + 2) / w, (y1 - y0 + 2) / h);
+        orbit.target.addScaledVector(right, cx * orbit.dist * th * camera.aspect).addScaledVector(up, cy * orbit.dist * th);
+        orbit.dist *= ext / (o.margin || 0.9); placeCamera(); camera.updateMatrixWorld(); shoot();
+      }
+      if (o.fit) { orbit.target.copy(saved.t); orbit.dist = saved.d; placeCamera(); }
       scene.background = oldBg; renderer.setPixelRatio(pr); renderer.setSize(cw, ch, false); camera.aspect = cw / ch; camera.updateProjectionMatrix(); needs = true;
       return out;
     },

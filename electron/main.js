@@ -166,9 +166,38 @@ ipcMain.handle('replaceOriginal', async (_e, { oldPath, oldName, newName }) => {
   }
   return { movedTo, savegames, backupDir: savegames.length ? backupRoot : null, dependents };
 });
-ipcMain.handle('pickFolder', async (_e, current) => {
-  const r = await dialog.showOpenDialog(win, { title: 'Choose your FS25 mods folder', defaultPath: current || DEFAULT_MODS(), properties: ['openDirectory'] });
+ipcMain.handle('pickFolder', async (_e, current, title) => {
+  const r = await dialog.showOpenDialog(win, { title: title || 'Choose your FS25 mods folder', defaultPath: current || DEFAULT_MODS(), properties: ['openDirectory'] });
   return r.canceled ? null : r.filePaths[0];
+});
+/* ---- the game's own files ($data/...): base game wheels, hubs and textures that mods use, read only ---- */
+const isDataDir = d => { try { return fs.statSync(path.join(d, 'shared')).isDirectory(); } catch (e) { return false; } };
+function gameDataFrom(dir) { // the install folder or its data folder
+  if (!dir) return null;
+  for (const d of [path.join(dir, 'data'), dir]) if (isDataDir(d)) return d;
+  return null;
+}
+function steamLibraries() {
+  const roots = ['C:\\Program Files (x86)\\Steam', 'C:\\Program Files\\Steam'], out = [...roots];
+  for (const r of roots) { try { const vdf = fs.readFileSync(path.join(r, 'steamapps', 'libraryfolders.vdf'), 'utf8'); for (const m of vdf.matchAll(/"path"\s+"([^"]+)"/g)) out.push(m[1].replace(/\\\\/g, '\\')); } catch (e) {} }
+  return [...new Set(out)];
+}
+ipcMain.handle('gameDataDir', async (_e, dir) => {
+  if (dir) return gameDataFrom(dir);
+  if (process.env.FDS_GAME_DATA) return gameDataFrom(process.env.FDS_GAME_DATA); // tests
+  const pf = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, 'C:\\Program Files (x86)', 'C:\\Program Files', 'D:\\Program Files (x86)', 'D:\\Program Files'].filter(Boolean);
+  const tries = [];
+  for (const p of pf) tries.push(path.join(p, 'Farming Simulator 2025'), path.join(p, 'Farming Simulator 25'), path.join(p, 'Epic Games', 'FarmingSimulator25'));
+  for (const l of steamLibraries()) tries.push(path.join(l, 'steamapps', 'common', 'Farming Simulator 25'), path.join(l, 'steamapps', 'common', 'Farming Simulator 2025'));
+  for (const d of ['C', 'D', 'E', 'F']) tries.push(`${d}:\\SteamLibrary\\steamapps\\common\\Farming Simulator 25`, `${d}:\\Games\\Farming Simulator 2025`, `${d}:\\Farming Simulator 2025`);
+  for (const t of tries) { const g = gameDataFrom(t); if (g) return g; }
+  return null;
+});
+ipcMain.handle('readGameFile', async (_e, dataDir, rel) => { // rel is the part after $data/; never leaves the data folder
+  if (!dataDir || !rel || !isDataDir(dataDir)) return null;
+  const full = path.resolve(dataDir, rel.replace(/^[\\/]+/, ''));
+  if (!full.startsWith(path.resolve(dataDir) + path.sep)) return null;
+  try { return new Uint8Array(await fsp.readFile(full)); } catch (e) { return null; }
 });
 ipcMain.handle('listMods', async (_e, dir) => {
   const items = await fsp.readdir(dir, { withFileTypes: true }); const out = [];
