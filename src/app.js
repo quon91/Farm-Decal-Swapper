@@ -1700,6 +1700,7 @@ const LM_PRESETS = {
   timber: { template: 'seal', pic: 'pine', l2: 'TIMBER', l3: '', palette: 'timber', font: 'western' },
   grain: { template: 'shield', pic: 'binsScene', l2: 'GRAIN', l3: '', palette: 'grain', font: 'western' },
   plate: { template: 'plate', pic: 'none', l1: 'FARM 01', l2: '', l3: '', palette: 'delta', font: 'bold', plate: true },
+  words: { template: 'words', pic: 'none', l2: 'FARMS', l3: '', palette: 'delta', font: 'heavy', font2: 'condensed', style: 'line' },
 };
 function initMaker() {
   if (LM.ready) { lmDraw(); return; } LM.ready = true;
@@ -1707,7 +1708,9 @@ function initMaker() {
   for (const [k, t] of Object.entries(L.TEMPLATES)) add($('lmTemplate'), k, t.label);
   const groups = {}; for (const [k, p] of Object.entries(L.PICS)) (groups[p.group] = groups[p.group] || []).push([k, p]);
   for (const [g, list] of Object.entries(groups)) { const og = document.createElement('optgroup'); og.label = g; for (const [k, p] of list) og.appendChild(new Option(p.label + (p.kind === 'scene' ? ' (scene)' : ''), k)); $('lmPic').appendChild(og); }
-  for (const [k, ft] of Object.entries(L.FONTS)) add($('lmFont'), k, ft.label);
+  for (const [k, ft] of Object.entries(L.FONTS)) { add($('lmFont'), k, ft.label); add($('lmFont2'), k, ft.label); }
+  $('lmFont2').addEventListener('change', lmChanged);
+  document.querySelectorAll('#lmStyle button').forEach(b => b.onclick = () => { LM.style = b.dataset.s; document.querySelectorAll('#lmStyle button').forEach(x => x.setAttribute('aria-pressed', x === b)); lmChanged(); });
   for (const [k, p] of Object.entries(L.PALETTES)) add($('lmPal'), k, p.label); add($('lmPal'), 'custom', 'Your own colours');
   let saved = null; try { saved = JSON.parse(store.get('lmState') || 'null'); } catch (e) {}
   lmApply(saved || Object.assign({}, LM_PRESETS.farm, { l1: farmName(), l3: (window.FDS_DEFAULTS || {}).est || '' }));
@@ -1784,7 +1787,8 @@ function lmPhotoUI() {
 function lmSwatches(p) { $('lmBg').value = p.bg; $('lmMetal').value = p.metal; $('lmInk').value = p.ink; $('lmText').value = p.text; }
 function lmApply(st) {
   const L = window.LogoMaker;
-  $('lmTemplate').value = st.template || 'seal'; $('lmPic').value = st.pic || 'none'; $('lmFont').value = st.font || 'western';
+  $('lmTemplate').value = st.template || 'seal'; $('lmPic').value = st.pic || 'none'; $('lmFont').value = st.font || 'western'; $('lmFont2').value = st.font2 || 'condensed';
+  LM.style = st.style || 'solid'; document.querySelectorAll('#lmStyle button').forEach(x => x.setAttribute('aria-pressed', x.dataset.s === LM.style));
   $('lmL1').value = st.l1 || ''; $('lmL2').value = st.l2 || ''; $('lmL3').value = st.l3 || '';
   $('lmPal').value = st.palette || 'delta'; lmSwatches(st.colors || L.PALETTES[st.palette] || L.PALETTES.delta);
   LM.mono = st.mono || ''; document.querySelectorAll('#lmMono button').forEach(x => x.setAttribute('aria-pressed', x.dataset.m === LM.mono));
@@ -1795,6 +1799,7 @@ function lmOpts(withFonts) {
   const L = window.LogoMaker, pal = $('lmPal').value, base = L.PALETTES[pal] || L.PALETTES.delta;
   const o = { template: $('lmTemplate').value, pic: $('lmPic').value, l1: $('lmL1').value.trim(), l2: $('lmL2').value.trim(), l3: $('lmL3').value.trim(), font: $('lmFont').value,
     palette: pal === 'custom' ? 'delta' : pal, colors: pal === 'custom' ? { bg: $('lmBg').value, metal: $('lmMetal').value, ink: $('lmInk').value, text: $('lmText').value, soft: '#f4f1e8', accent: $('lmMetal').value } : null, mono: LM.mono || null };
+  if (L.WORDS && L.WORDS.includes(o.template)) { o.font2 = $('lmFont2').value; o.style = LM.style || 'solid'; }
   if (withFonts) o.fonts = window.LM_FONTS;
   if (LM.photo) { o.photo = LM.photoUrl; o.photoMode = $('lmPhotoMode').value; }
   o.picX = LM.picX; o.picY = LM.picY; o.picScale = LM.picScale;
@@ -1808,6 +1813,10 @@ function lmRecipe() { // everything needed to open this logo in the maker again
   return o;
 }
 function lmChanged() {
+  const isWords = window.LogoMaker && (window.LogoMaker.WORDS || []).includes($('lmTemplate').value); $('fLmFont2').hidden = !isWords; $('fLmStyle').hidden = !isWords;
+  // word logos use two colours (the name and the second line), and no small line
+  $('lmBg').parentElement.hidden = isWords; $('lmInk').parentElement.hidden = isWords; $('lmL3').closest('.field').hidden = isWords;
+  $('lmMetal').parentElement.firstChild.nodeValue = isWords ? 'Second line ' : 'Trim '; $('lmText').parentElement.firstChild.nodeValue = isWords ? 'Main name ' : 'Text ';
   $('lmPicScaleV').textContent = Math.round(LM.picScale * 100) + '%';
   const o = lmOpts(); try { const st = Object.assign({}, o, { palette: $('lmPal').value }); delete st.photo; store.set('lmState', JSON.stringify(st)); } catch (e) {}
   if (!LM.nameEdited) $('lmName').value = lmDefaultName();

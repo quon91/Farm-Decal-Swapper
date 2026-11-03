@@ -10,7 +10,16 @@ const FONTS = {
   bold: { family: 'Bebas Neue', w: 0.42, label: 'Tall bold' },
   stencil: { family: 'Saira Stencil One', w: 0.64, label: 'Stencil' },
   script: { family: 'Pacifico', w: 0.58, label: 'Script' },
+  heavy: { family: 'Archivo Black', w: 0.77, label: 'Heavy', ws: -0.12 },
+  brush: { family: 'Lobster', w: 0.52, label: 'Brush script' },
+  condensed: { family: 'Oswald', w: 0.5, label: 'Condensed' },
 };
+/* letter widths (per 1000 of the font size, characters 32-126), for laying out the word logos exactly */
+const ADV = {"Rye":[244,414,517,680,613,1130,833,284,386,386,481,526,342,420,331,399,714,451,634,608,695,628,713,610,687,713,331,331,499,541,499,573,1202,712,743,645,776,704,660,719,840,438,602,752,660,1022,810,769,695,769,758,613,737,756,692,1055,672,663,697,378,399,378,512,424,286,625,675,543,667,596,417,599,679,350,359,671,358,1000,676,671,676,653,538,518,437,678,596,897,604,591,589,341,268,341,660],"Alfa Slab One":[300,339,356,732,684,885,828,193,374,374,409,576,245,389,244,423,732,522,649,623,694,651,693,648,700,693,244,245,499,495,499,630,1148,806,775,722,804,713,632,782,840,420,666,835,653,1143,942,792,738,810,800,674,780,781,786,1207,800,776,689,325,424,325,413,600,403,615,662,562,658,594,384,654,696,346,313,678,350,1042,696,632,658,652,527,519,451,686,651,956,636,632,568,299,255,299,618],"Bebas Neue":[160,210,336,412,400,589,417,188,276,276,422,400,188,270,188,389,400,400,400,400,400,400,400,400,400,400,188,188,400,400,400,363,696,401,404,383,406,363,344,391,420,192,265,414,344,538,427,400,386,400,403,372,364,402,382,557,406,394,362,276,389,276,400,300,500,401,404,383,406,363,344,391,420,192,265,414,344,538,427,400,386,400,403,372,364,402,382,557,406,394,362,276,500,276,400],"Saira Stencil One":[260,363,525,700,539,898,739,300,374,374,454,540,330,379,330,429,660,402,614,610,654,628,662,576,676,662,330,330,541,540,541,521,944,687,670,568,680,616,576,660,716,330,425,683,541,885,716,698,645,698,674,612,581,690,663,996,678,633,618,399,429,399,426,400,311,558,578,465,578,557,437,578,588,299,299,576,299,857,588,572,578,578,425,498,427,586,551,846,566,588,534,381,305,381,497],"Pacifico":[265,340,510,700,524,896,851,290,613,613,520,700,257,403,257,509,543,376,560,520,577,518,541,497,512,541,257,257,700,700,700,476,1015,786,827,686,836,686,712,811,873,495,743,937,673,1232,884,816,805,816,880,693,697,890,763,1217,712,851,721,405,509,405,700,354,600,470,473,368,515,393,371,479,502,246,254,525,326,744,496,451,481,500,455,427,393,462,449,700,529,479,445,490,326,490,700],"Archivo Black":[333,333,500,660,667,1000,889,278,389,389,556,660,333,333,333,278,667,667,667,667,667,667,667,667,667,667,333,333,660,660,660,611,740,778,778,778,778,722,667,833,833,389,667,833,667,944,833,833,722,833,778,722,722,833,778,1000,778,778,722,389,278,389,660,500,333,667,667,667,667,667,389,667,667,333,333,667,333,1000,667,667,667,667,444,611,444,667,611,944,667,611,556,389,278,389,660],"Lobster":[217,257,353,659,548,796,682,196,437,413,515,442,216,290,263,311,546,317,492,514,476,517,500,464,499,489,267,276,358,515,362,441,688,668,641,497,663,459,459,578,665,375,536,601,379,787,668,665,573,665,601,570,481,716,615,962,620,620,542,400,362,400,421,444,201,526,444,384,525,384,267,507,505,267,240,518,267,752,505,439,468,486,376,382,267,505,414,661,522,486,428,352,532,352,431],"Oswald":[250,247,340,524,486,982,578,161,329,314,418,442,227,320,232,411,543,384,506,506,515,502,531,428,516,530,261,270,393,436,393,483,940,538,574,553,573,438,425,572,600,290,339,552,433,695,554,576,552,576,583,505,438,578,522,704,508,490,430,334,411,321,469,363,301,449,493,456,490,460,313,489,495,257,261,493,264,737,493,471,492,491,370,413,342,490,413,595,431,436,382,358,257,367,474]};
+function measure(txt, font, size, spacing = 0) {
+  const t = String(txt || ''), a = ADV[FONTS[font].family]; if (!a) return t.length * FONTS[font].w * size + Math.max(0, t.length - 1) * spacing;
+  let w = 0; for (const ch of t) { const c = ch.charCodeAt(0); w += (c >= 32 && c < 127 ? a[c - 32] : 600) / 1000 * size + (ch === ' ' ? (FONTS[font].ws || 0) * size : 0); } return w + Math.max(0, t.length - 1) * spacing;
+}
 const PALETTES = {
   delta: { label: 'Delta green & gold', bg: '#1f4d22', metal: '#e9b23a', ink: '#0f2c12', text: '#e9b23a', accent: '#d9531a', soft: '#f3ead2' },
   construction: { label: 'Construction black & orange', bg: '#1d1d1b', metal: '#f39200', ink: '#0b0b0a', text: '#f39200', accent: '#ffcc00', soft: '#f2efe9' },
@@ -405,6 +414,8 @@ const TEMPLATES = {
     s += `<text x="${objPic ? 1170 : W / 2}" y="760" font-family="Bebas Neue" font-size="560" text-anchor="middle" letter-spacing="20"${fitText(o.l1, 'bold', 560, objPic ? 1450 : 1800, 20) ? ` textLength="${objPic ? 1450 : 1800}" lengthAdjust="spacingAndGlyphs"` : ''} fill="${o.mono || o.pal.ink}">${esc(o.l1)}</text>`;
     s += text(o, o.l3, W / 2, H - 110, 96, 1300, { font: 'bold', spacing: 22, fill: o.mono || o.pal.bg, stroke: null, shadow: false });
     return s; } },
+  words: { label: 'Words (two lines)', w: 2400, h: 900, draw(o) { return words(o, false); } },
+  wordsLine: { label: 'Words (one line)', w: 3000, h: 420, draw(o) { return words(o, true); } },
   plateWide: { label: 'Licence plate (wide)', w: 2048, h: 434, draw(o) { // European size, 520 × 110 mm
     const u = o.uid, W = 2048, H = 434, B = 250;
     let s = '';
@@ -421,6 +432,39 @@ const TEMPLATES = {
     return s; } },
 };
 
+/* ---------------- word logos: just the lettering, solid or outlined ---------------- */
+function words(o, oneLine) {
+  const c1 = o.mono || o.pal.text, c2 = o.mono || (o.style === 'line' ? o.pal.metal : o.pal.metal), W = o.TW, H = o.TH, f2 = o.font2 || 'condensed';
+  const word = (txt, font, x, y, size, sp, fill, anchor = 'middle') => {
+    if (!txt) return '';
+    const ws = FONTS[font].ws ? ` word-spacing="${f(FONTS[font].ws * size)}"` : '';
+    const base = `x="${f(x)}" y="${f(y)}" font-family="${FONTS[font].family}" font-size="${f(size)}" text-anchor="${anchor}"${sp ? ` letter-spacing="${f(sp)}"` : ''}${ws}`;
+    return o.style === 'outline' ? `<text ${base} fill="none" stroke="${fill}" stroke-width="${f(Math.max(4, size * 0.028))}" stroke-linejoin="round">${esc(txt)}</text>` : `<text ${base} fill="${fill}">${esc(txt)}</text>`;
+  };
+  let s = '';
+  if (oneLine) { // "Cypress Bend · TRUCKING" or "RED CLAY CONTRACTING"
+    const same = f2 === o.font, dot = o.l2 && !same; // a dot between two letterings, a space between the same one
+    let size = 300; const sp2 = same ? 0 : size * 0.06, w1 = measure(o.l1, o.font, size), wS = !o.l2 ? 0 : dot ? size * 0.75 : measure(' ', o.font, size), w2 = measure(o.l2, f2, size * (same ? 1 : 0.78), sp2);
+    const k = Math.min(1, (W - 80) / (w1 + wS + w2)); size *= k;
+    const total = (w1 + wS + w2) * k, x0 = (W - total) / 2, y = H / 2 + size * 0.36;
+    s += word(o.l1, o.font, x0, y, size, 0, c1, 'start');
+    if (dot) s += `<circle cx="${f(x0 + (w1 + wS / 2) * k)}" cy="${f(y - size * 0.26)}" r="${f(size * 0.055)}" fill="${c2}"/>`;
+    s += word(o.l2, f2, x0 + (w1 + wS) * k, y, size * (same ? 1 : 0.78), sp2 * k, same ? c1 : c2, 'start');
+    return s;
+  }
+  // two lines: the name big, the second line smaller and spaced out underneath
+  let s1 = Math.min(430, (W - 120) / Math.max(1, measure(o.l1, o.font, 1)));
+  const w1 = measure(o.l1, o.font, s1), y1 = o.l2 ? H * 0.5 : H / 2 + s1 * 0.36;
+  s += word(o.l1, o.font, W / 2, y1, s1, 0, c1);
+  if (o.l2) {
+    let s2 = s1 * 0.4, sp = s2 * 0.05; const w2 = measure(o.l2, f2, s2, sp); if (w2 > w1 * 0.95) { const k = w1 * 0.95 / w2; s2 *= k; sp *= k; }
+    const ry = y1 + s1 * 0.13;
+    if (o.style === 'line') s += `<rect x="${f(W / 2 - w1 * 0.36)}" y="${f(ry)}" width="${f(w1 * 0.72)}" height="${f(Math.max(6, s1 * 0.022))}" fill="${c1}"/>`;
+    s += word(o.l2, f2, W / 2, ry + s2 * (o.style === 'line' ? 1.1 : 0.98), s2, sp, c2);
+  }
+  return s;
+}
+
 /* ---------------- build ---------------- */
 /** opts: { template, pic, l1, l2, l3, palette (key) | colors {bg, metal, ink, text}, font, mono ('#fff' | '#000' | null), fonts: {family: dataURL} } */
 function svg(opts) {
@@ -429,7 +473,8 @@ function svg(opts) {
   const uid = 'lm' + (++uidN) + '_';
   const o = { pal, uid, pic: opts.pic || 'none', l1: opts.l1 || '', l2: opts.l2 || '', l3: opts.l3 || '', font: FONTS[opts.font] ? opts.font : 'western', mono: opts.mono || null,
     photo: opts.photo || null, photoMode: opts.photoMode === 'fill' ? 'fill' : 'cutout',
-    picX: +opts.picX || 0, picY: +opts.picY || 0, picScale: Math.max(0.2, Math.min(4, +opts.picScale || 1)), TW: t.w, TH: t.h };
+    picX: +opts.picX || 0, picY: +opts.picY || 0, picScale: Math.max(0.2, Math.min(4, +opts.picScale || 1)), TW: t.w, TH: t.h,
+    style: ['outline', 'line'].includes(opts.style) ? opts.style : 'solid', font2: FONTS[opts.font2] ? opts.font2 : null };
   const gold = `<linearGradient id="${uid}m" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${light(pal.metal, 0.45)}"/><stop offset=".5" stop-color="${pal.metal}"/><stop offset="1" stop-color="${dark(pal.metal, 0.3)}"/></linearGradient>`;
   o.metalFill = o.mono || `url(#${uid}m)`;
   const filters = o.mono && o.photo ? `<filter id="${uid}sil" color-interpolation-filters="sRGB"><feFlood flood-color="${o.mono}"/><feComposite in2="SourceAlpha" operator="in"/></filter><filter id="${uid}gray" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/></filter>` : '';
@@ -438,6 +483,6 @@ function svg(opts) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${t.w}" height="${t.h}" viewBox="0 0 ${t.w} ${t.h}">${css ? `<style>${css}</style>` : ''}<defs>${gold}${filters}</defs>${body}</svg>`;
 }
 
-const api = { svg, TEMPLATES, PICS, PALETTES, FONTS, size: k => { const t = TEMPLATES[k] || TEMPLATES.seal; return [t.w, t.h]; } };
+const api = { svg, TEMPLATES, PICS, PALETTES, FONTS, measure, WORDS: ['words', 'wordsLine'], size: k => { const t = TEMPLATES[k] || TEMPLATES.seal; return [t.w, t.h]; } };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.LogoMaker = api;
 })(typeof window !== 'undefined' ? window : globalThis);

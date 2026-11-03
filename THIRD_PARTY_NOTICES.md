@@ -13,6 +13,6 @@ Farm Decal Swapper includes or is derived from the following open-source work.
 | [I3D Blender exporter](https://github.com/StjerneIdioten/I3D-Blender-Addon) | Reference for the i3d rotation order (no code copied) | — |
 | [Electron](https://www.electronjs.org/) | Desktop app shell | MIT |
 | Zilla Slab, Public Sans, JetBrains Mono (via [Fontsource](https://fontsource.org/)) | Bundled interface fonts in `src/fonts/` | SIL Open Font License 1.1 |
-| Rye, Alfa Slab One, Bebas Neue, Saira Stencil One, Pacifico (via [Fontsource](https://fontsource.org/)) | Logo maker lettering, embedded in `src/lmfonts.js` (licences in `src/fonts/OFL-LogoMaker.txt`) | SIL Open Font License 1.1 |
+| Rye, Alfa Slab One, Bebas Neue, Saira Stencil One, Pacifico, Archivo Black, Lobster, Oswald (via [Fontsource](https://fontsource.org/)) | Logo maker lettering, embedded in `src/lmfonts.js` (licences in `src/fonts/OFL-LogoMaker.txt`) | SIL Open Font License 1.1 |
 
 Farming Simulator, GIANTS Editor and the `.i3d` format are by GIANTS Software. This project is not affiliated with or endorsed by GIANTS Software.

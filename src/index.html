@@ -185,7 +185,7 @@
       <header class="vhead"><div><h1>Logo maker</h1><p class="muted">Make a logo from a layout, a picture, your words and colours, then add it to your library at 2048 px.</p></div></header>
       <div class="editbar" id="lmEditBar" hidden>Editing <b id="lmEditName"></b> from your library. <button type="button" class="btn small" id="lmEditStop">Stop editing</button></div>
       <div class="segs makerpresets" id="lmPresets" role="group" aria-label="Start from">
-        <button type="button" data-p="farm">Farm</button><button type="button" data-p="construction">Construction</button><button type="button" data-p="landscaping">Landscaping</button><button type="button" data-p="livestock">Livestock</button><button type="button" data-p="hauling">Hauling</button><button type="button" data-p="timber">Timber</button><button type="button" data-p="grain">Grain</button><button type="button" data-p="plate">Licence plate</button>
+        <button type="button" data-p="farm">Farm</button><button type="button" data-p="construction">Construction</button><button type="button" data-p="landscaping">Landscaping</button><button type="button" data-p="livestock">Livestock</button><button type="button" data-p="hauling">Hauling</button><button type="button" data-p="timber">Timber</button><button type="button" data-p="grain">Grain</button><button type="button" data-p="plate">Licence plate</button><button type="button" data-p="words">Words only</button>
       </div>
       <div class="maker">
         <div class="makerview checker"><canvas id="lmCanvas" aria-label="Logo preview"></canvas></div>
@@ -210,6 +210,8 @@
           <div class="field"><label for="lmL2">Second line</label><input type="text" id="lmL2" maxlength="28"></div>
           <div class="field"><label for="lmL3">Small line <span class="muted">(optional)</span></label><input type="text" id="lmL3" maxlength="36"></div>
           <div class="field"><label for="lmFont">Lettering</label><select id="lmFont"></select></div>
+          <div class="field" id="fLmFont2" hidden><label for="lmFont2">Second line lettering</label><select id="lmFont2"></select></div>
+          <div class="field" id="fLmStyle" hidden><span class="lab">Letters</span><div class="seg" id="lmStyle" role="group" aria-label="Letters"><button type="button" data-s="solid" aria-pressed="true">Solid</button><button type="button" data-s="line" aria-pressed="false">Solid with a line</button><button type="button" data-s="outline" aria-pressed="false">Outline</button></div></div>
           <div class="field"><label for="lmPal">Colours</label><select id="lmPal"></select>
             <div class="swatches"><label>Background <input type="color" id="lmBg"></label><label>Trim <input type="color" id="lmMetal"></label><label>Outline <input type="color" id="lmInk"></label><label>Text <input type="color" id="lmText"></label></div></div>
           <div class="field"><span class="lab">Version</span><div class="seg" id="lmMono" role="group" aria-label="Version"><button type="button" data-m="" aria-pressed="true">Full colour</button><button type="button" data-m="#ffffff">White</button><button type="button" data-m="#000000">Black</button></div></div>
