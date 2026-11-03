@@ -856,11 +856,19 @@ function addDependency(modDesc, name) {
   return modDesc.slice(0, ls) + `    <dependencies>${nl}        <dependency>${escText(name)}</dependency>${nl}    </dependencies>${nl}` + modDesc.slice(ls);
 }
 /** modDesc.xml of the small mod that adds your brand to the shop. */
-function brandModDesc({ descVersion = 96, brand, title, author = 'Farm Decal Swapper' }) {
+function brandModDesc({ descVersion = 96, brand, title, author = 'Farm Decal Swapper', brands = null }) {
+  if (brands && brands.length) { // several brands, each with its own picture
+    return `<?xml version="1.0" encoding="utf-8" standalone="no" ?>\n<modDesc descVersion="${+descVersion || 96}">\n    <author>${escText(author)}</author>\n    <version>1.0.0.0</version>\n` +
+      `    <title>\n        <en>${escText(title)} (shop brands)</en>\n    </title>\n    <description>\n        <en>Adds these brands to the shop: ${escText(brands.map(b => b.title).join(', '))}. Made with Farm Decal Swapper.</en>\n    </description>\n` +
+      `    <iconFilename>icon.dds</iconFilename>\n    <multiplayer supported="true"/>\n    <brands>\n` + brands.map(b => `        <brand name="${escAttr(b.name)}" title="${escAttr(b.title)}" image="${escAttr(b.image)}"/>\n`).join('') + `    </brands>\n</modDesc>\n`;
+  }
   return `<?xml version="1.0" encoding="utf-8" standalone="no" ?>\n<modDesc descVersion="${+descVersion || 96}">\n    <author>${escText(author)}</author>\n    <version>1.0.0.0</version>\n` +
     `    <title>\n        <en>${escText(title)} (shop brand)</en>\n    </title>\n    <description>\n        <en>Adds the ${escText(title)} brand to the shop so your own vehicles are listed together. Made with Farm Decal Swapper.</en>\n    </description>\n` +
     `    <iconFilename>icon.dds</iconFilename>\n    <multiplayer supported="true"/>\n    <brands>\n        <brand name="${escAttr(brand)}" title="${escAttr(title)}" image="brand.dds"/>\n    </brands>\n</modDesc>\n`;
 }
+
+/** Brands a modDesc defines: [{ name, title, image }]. */
+function modBrands(md) { const out = []; for (const m of String(md || '').matchAll(/<brand\b[^>]*>/g)) { const a = k => (m[0].match(new RegExp('\\b' + k + '="([^"]*)"')) || [])[1]; if (a('name')) out.push({ name: a('name'), title: a('title') || a('name'), image: a('image') || '' }); } return out; }
 
 /* ================= shop choices that switch parts on and off ================= */
 const SCENE_TAGS = new Set(['Shape', 'TransformGroup', 'Light', 'Camera', 'Dynamic', 'AudioSource']);
@@ -1120,7 +1128,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { normPath, categoriesLua, categoriesModDesc, storeCategoryOf, brushOf, isPlaceableXml, setStoreCategory, setBrush, storeBrandOf, storeYearOf, setStoreYear, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { normPath, modBrands, categoriesLua, categoriesModDesc, storeCategoryOf, brushOf, isPlaceableXml, setStoreCategory, setBrush, storeBrandOf, storeYearOf, setStoreYear, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;

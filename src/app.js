@@ -130,6 +130,7 @@ async function loadModsFolder() {
     $('modGrid').appendChild(d); return; }
   S.mods = list; try { S.originals = await APP.listOriginals(); } catch (e) { S.originals = []; } renderModGrid(); scanEdited();
   $('btnCheckMods').hidden = !APP.modCheckData || !S.mods.length;
+  if (store.get('myBrands') == null) readBrandMod(true).catch(() => {}); // first time: bring in the brands your brand mod already has
 }
 /* ---- mod check: problems the game trips over, from the mods themselves and from the game's log; fixes only when you tick them ---- */
 const CHECK = { results: [], dupes: [], log: null, running: false };
@@ -911,7 +912,7 @@ function renamePlan() { // what will change: Map(xml -> { sets: Map(tag -> Map(i
     for (const c of choiceNames(g)) { const v = (c.value || '').trim(); if (v && v !== c.original) { const e = at(g.xml); if (!e.sets.has(g.tag)) e.sets.set(g.tag, new Map()); e.sets.get(g.tag).set(c.it.index, v); } } }
   for (const [xml, name] of M.storeNames) { const cur = (storeItems().find(s => s.xml === xml) || {}).name; if (name.trim() && cur && name.trim() !== cur.text) at(xml).store = name.trim(); }
   // a brand or year only for items that have none
-  for (const [xml, b] of M.storeBrands || []) { const v = b.trim().toUpperCase(); if (v && !Core.storeBrandOf(xmlText(xml))) at(xml).brand = v; }
+  for (const [xml, b] of M.storeBrands || []) { const v = b.trim().toUpperCase(); if (v && v !== Core.storeBrandOf(xmlText(xml)).toUpperCase()) at(xml).brand = v; }
   for (const [xml, y] of M.storeYears || []) { const v = String(y).trim(); if (/^\d{4}$/.test(v) && !Core.storeYearOf(xmlText(xml))) at(xml).year = v; }
   for (const [xml, v] of M.storeTiles || []) if (v) at(xml).tile = v;
   for (const [xml, v] of M.storeTabs || []) if (v) at(xml).tab = v;
@@ -925,6 +926,23 @@ async function gameBrands() {
     for (const m of new TextDecoder().decode(u8).matchAll(/<brand\b[^>]*\bname="([^"]+)"[^>]*>/g)) out.set(m[1].toUpperCase(), (m[0].match(/\btitle="([^"]+)"/) || [])[1] || m[1]); }
   return (BRANDS.game = [...out]);
 }
+/** The Brand choice for one shop item: shows what it has, and lets you change it to any brand you have. */
+function brandField(meta, xml, cur) {
+  const w = document.createElement('label'); w.className = 'metafield'; w.append(document.createTextNode('Brand '));
+  const sel = document.createElement('select'); sel.setAttribute('aria-label', 'Brand'); const titleOf = new Map((BRANDS.game || []).map(([k, t]) => [k, t]));
+  for (const b of Core.modBrands(modDescPath() ? xmlText(modDescPath()) : '')) titleOf.set(b.name.toUpperCase(), b.title);
+  for (const b of allBrands()) titleOf.set(b.key, b.title);
+  sel.add(new Option(cur ? `${titleOf.get(cur.toUpperCase()) || cur} (keep)` : 'None (keep)', ''));
+  const grp = (label, items) => { if (!items.length) return; const g = document.createElement('optgroup'); g.label = label; for (const [k, t] of items) if (k.toUpperCase() !== (cur || '').toUpperCase()) g.appendChild(new Option(t === k ? k : `${t} (${k})`, k)); if (g.children.length) sel.appendChild(g); };
+  grp('My brands', allBrands().map(b => [b.key, b.title]));
+  grp('In this mod', Core.modBrands(modDescPath() ? xmlText(modDescPath()) : '').map(b => [b.name.toUpperCase(), b.title]));
+  grp('The game’s brands', (BRANDS.game || []).slice().sort((a, b) => a[1].localeCompare(b[1])));
+  if (!BRANDS.game || !BRANDS.game.length) grp('The game’s brands', [['LIZARD', 'Lizard']]);
+  sel.value = S.mod.storeBrands.get(xml) || '';
+  sel.onchange = () => { if (sel.value) S.mod.storeBrands.set(xml, sel.value); else S.mod.storeBrands.delete(xml); updateChanges(); };
+  const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'linkish'; edit.textContent = 'Add or edit my brands'; edit.onclick = e => { e.preventDefault(); setView('settings'); setTimeout(() => $('myBrands').scrollIntoView({ block: 'center' }), 50); };
+  w.append(sel, edit); meta.appendChild(w);
+}
 async function fillBrandNames(dl) {
   const list = new Map([['LIZARD', 'Lizard (the game’s own no-name brand)']]);
   for (const s of storeItems()) { try { const b = Core.storeBrandOf(xmlText(s.xml)); if (b) list.set(b.toUpperCase(), b); } catch (e) {} }
@@ -934,12 +952,13 @@ async function fillBrandNames(dl) {
 }
 function renderOpts() {
   const box = $('optList'); box.innerHTML = ''; if (!S.mod) return;
+  if (BRANDS.dir !== GAME.dir) gameBrands().then(() => { if (S.mod && !$('tab-options').hidden) renderOpts(); }).catch(() => {}); // the game's brand list, once
   const gs = S.mod.analysis.groups;
   // shop names
   const stores = storeItems();
   if (stores.length) {
     const sec = document.createElement('div'); sec.className = 'opts names';
-    sec.innerHTML = '<div class="opthead"><h3>Name in the shop</h3><span class="muted">What the shop calls each vehicle in this mod. Items without a brand or year can be given one; the ones they already have stay as they are.</span></div><datalist id="brandNames"></datalist>';
+    sec.innerHTML = '<div class="opthead"><h3>Name in the shop</h3><span class="muted">What the shop calls each vehicle in this mod, and its brand: each keeps the brand it has until you pick another (yours, one from your brand list, or the game’s). Items without a year can be given one.</span></div><datalist id="brandNames"></datalist>';
     fillBrandNames(sec.querySelector('#brandNames'));
     for (const s of stores) {
       const row = document.createElement('label'), inp = document.createElement('input'); row.className = 'namerow';
@@ -954,7 +973,7 @@ function renderOpts() {
         if (cur) { const b = document.createElement('b'); b.textContent = cur; w.appendChild(b); }
         else { const i = document.createElement('input'); i.type = 'text'; const { list, ...rest } = opts; Object.assign(i, rest); if (list) i.setAttribute('list', list); i.value = map.get(s.xml) || ''; i.oninput = () => { const v = i.value.trim(); if (v) map.set(s.xml, v); else map.delete(s.xml); updateChanges(); }; w.appendChild(i); }
         meta.appendChild(w); };
-      field('Brand', curB, S.mod.storeBrands, { placeholder: 'none yet: add one', size: 18, list: 'brandNames' });
+      brandField(meta, s.xml, curB);
       field('Year', curY, S.mod.storeYears, { placeholder: 'none yet', inputMode: 'numeric', maxLength: 4, size: 6 });
       // your own shop tile (vehicles) or build-menu tab (buildings)
       if (APP) { const placeable = Core.isPlaceableXml(t), w = document.createElement('label'); w.className = 'metafield'; const sel = document.createElement('select');
@@ -1910,6 +1929,56 @@ async function writeCatMod(descVersion) {
   return APP.writeNewZip({ dir: S.modsDir, name: catModName() + '.zip', data, overwrite: true });
 }
 $('btnCatWrite').onclick = async () => { try { const w = await writeCatMod(96); toast(w && w.saved ? `Wrote ${catModName()}.zip to your mods folder.` : 'Couldn’t write it.'); } catch (e) { toast('Couldn’t write it: ' + cleanErr(e)); } };
+/* ---- your brands: the main one (Settings) plus any others, each with a logo; all in one brand mod ---- */
+const brandKeyOf = t => String(t).toUpperCase().replace(/&/g, 'AND').replace(/[^A-Z0-9]+/g, '');
+function extraBrands() { try { return JSON.parse(store.get('myBrands') || '[]'); } catch (e) { return []; } }
+const saveBrands = list => store.set('myBrands', JSON.stringify(list));
+function allBrands() { // [{ key, title, logo, main }]
+  const main = { key: brandKey(), title: brandTitle(), logo: $('brandLogo').value || store.get('brandLogo') || ((window.FDS_DEFAULTS || {}).brandLogo || ''), main: true };
+  const seen = new Set([main.key]), out = [main];
+  for (const b of extraBrands()) { const key = b.key || brandKeyOf(b.title); if (!b.title || !key || seen.has(key)) continue; seen.add(key); out.push({ key, title: b.title, logo: b.logo || '' }); }
+  return out;
+}
+const gameBrandKeys = () => new Set((BRANDS.game || []).map(([k]) => k));
+const myBrandKeys = () => new Set(allBrands().filter(b => !gameBrandKeys().has(b.key)).map(b => b.key)); // brands the brand mod has to create
+function brandPicture(l, W = 512, H = 256) { const c = document.createElement('canvas'); c.width = W; c.height = H; if (l) c.getContext('2d').drawImage(fitInto(l.canvas, W, H, 0.04), 0, 0); return c; }
+function myBrandsUI() {
+  const box = $('myBrands'); if (!box) return; box.innerHTML = ''; const list = extraBrands(), game = gameBrandKeys();
+  list.forEach((b, i) => {
+    const row = document.createElement('div'), cv = document.createElement('canvas'), inp = document.createElement('input'), sel = document.createElement('select'), del = document.createElement('button');
+    row.className = 'catrow'; cv.className = 'wide checker'; cv.width = 160; cv.height = 80; inp.value = b.title; inp.placeholder = 'Brand name, e.g. Peterbilt'; inp.setAttribute('aria-label', 'Brand name');
+    sel.setAttribute('aria-label', 'Brand logo'); sel.add(new Option('Pick its logo…', '')); for (const l of S.lib) sel.add(new Option(l.name, l.id)); sel.value = S.lib.some(l => l.id === b.logo) ? b.logo : '';
+    del.type = 'button'; del.className = 'btn small'; del.textContent = 'Remove';
+    const note = document.createElement('span'); note.className = 'note';
+    const draw = () => { const g = cv.getContext('2d'); g.clearRect(0, 0, 160, 80); const l = logoById(sel.value); if (l) g.drawImage(brandPicture(l, 160, 80), 0, 0);
+      const k = brandKeyOf(inp.value); note.textContent = !k ? '' : game.has(k) ? `The game already has ${k}: items get the game’s brand and its own logo.` : `Shop key ${k}.` + (l ? '' : ' Pick a logo for it.'); };
+    inp.oninput = () => { list[i].title = inp.value; list[i].key = brandKeyOf(inp.value); saveBrands(list); draw(); };
+    sel.onchange = () => { list[i].logo = sel.value; saveBrands(list); draw(); };
+    del.onclick = () => { list.splice(i, 1); saveBrands(list); myBrandsUI(); };
+    row.append(cv, inp, sel, del, note); box.appendChild(row); draw();
+  });
+  if (!list.length) box.innerHTML = '<div class="muted hint">None yet. Add one for each brand you want in the shop.</div>';
+}
+$('brandAdd').onclick = () => { const list = extraBrands(); list.push({ title: '', logo: '' }); saveBrands(list); myBrandsUI(); const ins = $('myBrands').querySelectorAll('input'); if (ins.length) ins[ins.length - 1].focus(); };
+/** Read the brand mod you already have (names and logos) back into the app, so nothing is lost. */
+async function readBrandMod(quiet) {
+  const m = (S.mods || []).find(x => x.name.toLowerCase() === (brandModName() + '.zip').toLowerCase()); if (!m || !APP) { if (!quiet) toast(`There’s no ${brandModName()}.zip in your mods folder yet.`); return 0; }
+  const z = await JSZip.loadAsync(await APP.readFile(m.path)), mdF = Object.keys(z.files).find(k => /(^|\/)moddesc\.xml$/i.test(k)); if (!mdF) return 0;
+  const brands = Core.modBrands(await z.file(mdF).async('string')), list = extraBrands(); let n = 0;
+  for (const b of brands) {
+    let logo = '';
+    const f = b.image && z.file(Object.keys(z.files).find(k => k.toLowerCase() === Core.toDDS(b.image).toLowerCase()) || '');
+    if (f) { const name = `${b.title} (brand logo)`; let l = S.lib.find(x => x.name === name);
+      if (!l) { try { const r = Core.decodeDDS(await f.async('uint8array')); if (!r.error) { const c = trimCanvas(rgbaToCanvas(r.rgba, r.width, r.height)), blob = await canvasBlob(c); l = await addLogo(blob, name, { cleaned: true }); l.needsBg = false; l.folder = 'Brands'; await saveRec(l); } } catch (e) {} }
+      if (l) logo = l.id; }
+    if (b.name === brandKey()) { if (logo && !logoById($('brandLogo').value)) { brandUI(); $('brandLogo').value = logo; store.set('brandLogo', logo); } continue; }
+    const have = list.find(x => (x.key || brandKeyOf(x.title)) === b.name);
+    if (have) { if (!have.logo && logo) have.logo = logo; } else { list.push({ title: b.title, key: b.name, logo }); n++; }
+  }
+  saveBrands(list); renderLib(); refreshLogos(); brandUI(); if (!quiet) toast(n ? `Read ${n} brand${n === 1 ? '' : 's'} from ${m.name}.` : `Your brands already match ${m.name}.`); return n;
+}
+$('brandRead').onclick = () => readBrandMod(false).catch(e => toast('Couldn’t read it: ' + cleanErr(e)));
+$('brandWrite').onclick = async () => { try { await gameBrands(); const w = await writeBrandMod(96); toast(w && w.saved ? `Updated ${brandModName()}.zip with ${myBrandKeys().size} brand${myBrandKeys().size === 1 ? '' : 's'}.` : 'Couldn’t write it.'); } catch (e) { toast('Couldn’t write it: ' + cleanErr(e)); } };
 /* ---- your own brand in the shop (vehicles in your copies are listed under it) ---- */
 const brandTitle = () => ($('brandTitle').value || '').trim() || (farmName().replace(/\w\S*/g, w => w[0] + w.slice(1).toLowerCase()) + ' Farms');
 const brandKey = () => (copyTag() + 'FARMS').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1917,6 +1986,7 @@ const brandModName = () => `FS25_${copyTag()}_Brand`;
 const brandActive = () => !!(APP && $('brandOn').checked);
 function brandUI() {
   try { catUI(); } catch (e) { console.warn(e); }
+  try { myBrandsUI(); } catch (e) { console.warn(e); }
   const sel = $('brandLogo'), cur = sel.value || store.get('brandLogo') || ((window.FDS_DEFAULTS || {}).brandLogo || ''); sel.length = 0;
   for (const l of S.lib) sel.add(new Option(l.name, l.id)); if (S.lib.some(l => l.id === cur)) sel.value = cur;
   $('brandInfo').textContent = `In the shop, open Brands and choose “${brandTitle()}”. The app adds a small mod, ${brandModName()}.zip, to your mods folder that creates the brand; keep it installed. Buildings aren’t listed by brand in the game, so they stay where they are.`;
@@ -1925,8 +1995,11 @@ function fitInto(src, W, H, pad) { const c = document.createElement('canvas'); c
   g.imageSmoothingQuality = 'high'; g.drawImage(src, (W - src.width * k) / 2, (H - src.height * k) / 2, src.width * k, src.height * k); return c; }
 async function writeBrandMod(descVersion) { // the small mod that creates the brand; rewritten each time so logo and name stay current
   const l = logoById($('brandLogo').value) || S.lib[0]; if (!l) throw new Error('add a logo to your library first');
-  const z = new JSZip(), img = (W, H) => { const c = fitInto(l.canvas, W, H, 0.04); return Core.encodeDDS(c.getContext('2d').getImageData(0, 0, W, H).data, W, H, 'lossless'); };
-  z.file('modDesc.xml', Core.brandModDesc({ descVersion, brand: brandKey(), title: brandTitle() })); z.file('brand.dds', img(512, 256)); z.file('icon.dds', img(256, 256));
+  const z = new JSZip(), img = (lg, W, H) => { const c = fitInto(lg.canvas, W, H, 0.04); return Core.encodeDDS(c.getContext('2d').getImageData(0, 0, W, H).data, W, H, 'lossless'); };
+  const game = gameBrandKeys(), brands = [];
+  for (const b of allBrands()) { if (game.has(b.key) && !b.main) continue; const lg = logoById(b.logo) || (b.main ? l : null); if (!lg) continue; // a brand needs a picture
+    const image = b.main ? 'brand.dds' : `brands/${b.key.toLowerCase()}.dds`; z.file(image, img(lg, 512, 256)); brands.push({ name: b.key, title: b.title, image }); }
+  z.file('modDesc.xml', Core.brandModDesc({ descVersion, title: brandTitle(), brands })); z.file('icon.dds', img(l, 256, 256));
   const data = new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }));
   return APP.writeNewZip({ dir: S.modsDir, name: brandModName() + '.zip', data, overwrite: true });
 }
@@ -2009,7 +2082,7 @@ async function saveMod() {
       // renames last: new choices go at the end of a set, so the existing choices keep their positions
       const rn = ren.get(xml);
       if (rn) { for (const [tag, m] of rn.sets) src = Core.renameConfigItems(src, tag, m); if (rn.store) src = Core.setStoreName(src, rn.store);
-        if (rn.brand) { src = Core.setStoreBrand(src, rn.brand); if (rn.brand === brandKey()) wantBrandMod = true; } if (rn.year) src = Core.setStoreYear(src, rn.year);
+        if (rn.brand) { src = Core.setStoreBrand(src, rn.brand); if (myBrandKeys().has(rn.brand)) wantBrandMod = true; } if (rn.year) src = Core.setStoreYear(src, rn.year);
         if (rn.tile) { src = Core.setStoreCategory(src, rn.tile); wantCatMod = true; } if (rn.tab) { src = Core.setBrush(src, catKey().toLowerCase() + '_farms', rn.tab.toLowerCase()); wantCatMod = true; } }
       textOut.set(xml, src);
     }
