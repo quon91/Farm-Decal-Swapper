@@ -129,7 +129,7 @@ async function loadModsFolder() {
     d.textContent = /ENOENT/.test(e.message) ? 'There’s no mods folder at this location yet. Use Change folder to point at the folder where FS25 keeps your mods, or open a mod zip directly.' : 'This folder couldn’t be read (' + cleanErr(e) + '). Use Change folder to pick another one.';
     $('modGrid').appendChild(d); return; }
   S.mods = list; try { S.originals = await APP.listOriginals(); } catch (e) { S.originals = []; } renderModGrid(); scanEdited();
-  $('btnCheckMods').hidden = !APP.modCheckData || !S.mods.length;
+  $('btnCheckMods').hidden = !APP.modCheckData || !S.mods.length; loadRevertInfo();
   if (store.get('myBrands') == null) readBrandMod(true).catch(() => {}); // first time: bring in the brands your brand mod already has
 }
 /* ---- mod check: problems the game trips over, from the mods themselves and from the game's log; fixes only when you tick them ---- */
@@ -233,6 +233,50 @@ $('checkFix').onclick = async () => {
   }
   toast(`Fixed ${done.length} mod${done.length === 1 ? '' : 's'}.` + (failed.length ? ' Not fixed: ' + failed.join(', ') : ''));
   await runCheck(done); // look at the fixed ones again
+};
+/* ---- revert: back to exactly the original (file name and contents), from Original mods or the oldest untouched backup ---- */
+const REVERT = { list: [], armed: 0 };
+async function loadRevertInfo() {
+  if (!APP || !APP.revertInfo || !S.modsDir) return [];
+  try { REVERT.list = await APP.revertInfo({ dir: S.modsDir, tag: copyTag() }); } catch (e) { REVERT.list = []; }
+  $('btnRevertMods').hidden = !REVERT.list.length; showRevertButton(); return REVERT.list;
+}
+function showRevertButton() { $('btnRevertMod').hidden = !(S.mod && S.mod.path && REVERT.list.some(r => r.path === S.mod.path)); }
+function openRevert(only) {
+  const box = $('revertList'), list = REVERT.list.filter(r => !only || r.path === only); box.innerHTML = '';
+  $('revertWhat').textContent = list.length ? `${list.length} mod${list.length === 1 ? '' : 's'} can go back to the original.` : 'No edited mods to revert.';
+  for (const r of list) {
+    const row = document.createElement('label'), cb = document.createElement('input'); row.className = 'fixrow'; cb.type = 'checkbox'; cb.checked = !!only; cb.dataset.path = r.path;
+    const info = document.createElement('div'), t = document.createElement('b'), m = document.createElement('span'); m.className = 'muted';
+    t.textContent = r.isCopy ? `${r.name}  →  ${r.original}` : r.name;
+    const when = r.source && r.source.kind === 'backup' && r.source.stamp ? r.source.stamp.slice(0, 10) : '';
+    m.textContent = (r.isCopy ? 'Your copy goes back to the original mod, and your savegames switch back to it. ' : 'Edited in place: ') +
+      (!r.source ? 'The original is still in your mods folder; your copy is taken out.' : r.source.kind === 'originals' ? 'The original comes back from Original mods' + (r.source.pristine ? ' (untouched).' : ' (it was edited before it was moved there; earlier backups aren’t there).')
+        : `Restored from the backup of ${when}` + (r.source.pristine ? ' (untouched).' : ' (the oldest backup there is, but it already had some changes).'));
+    info.append(t, m); row.append(cb, info); box.appendChild(row); cb.onchange = () => { $('revertGo').disabled = !box.querySelector('input:checked'); };
+  }
+  $('revertGo').disabled = !box.querySelector('input:checked'); REVERT.armed = 0; $('revertGo').textContent = 'Revert the ticked mods'; $('revertDlg').hidden = false;
+}
+$('btnRevertMods').onclick = async () => { await loadRevertInfo(); openRevert(null); };
+$('btnRevertMod').onclick = async () => { if (unsaved() && !confirmDiscard()) return; await loadRevertInfo(); openRevert(S.mod.path); };
+$('revertClose').onclick = () => { $('revertDlg').hidden = true; };
+$('revertGo').onclick = async () => {
+  if (Date.now() - REVERT.armed > 6000) { REVERT.armed = Date.now(); $('revertGo').textContent = 'Click again to revert'; return; } // a second click, so it can't happen by accident
+  const paths = [...$('revertList').querySelectorAll('input:checked')].map(c => c.dataset.path), done = [], failed = [];
+  $('revertGo').disabled = true;
+  for (const p of paths) {
+    const r = REVERT.list.find(x => x.path === p); if (!r) continue;
+    $('revertWhat').textContent = `Reverting ${r.name}…`; await tick();
+    try {
+      const res = await APP.revertMod({ path: r.path, isCopy: r.isCopy, original: r.original, sourcePath: r.source ? r.source.path : null, sourceKind: r.source ? r.source.kind : null });
+      if (res.error === 'game-running') { failed.push('close the game first'); break; } if (res.error) throw new Error(res.error);
+      done.push(r.isCopy ? `${r.name} → ${r.original}` + (res.savegames.length ? ` (${res.savegames.length} savegame${res.savegames.length === 1 ? '' : 's'} switched back)` : '') : r.name);
+      const all = logoUses(); delete all[r.path]; store.set('logoUses', JSON.stringify(all)); // its logos are gone with it
+      if (S.mod && S.mod.path === r.path) { if (S.viewer) { S.viewer.dispose(); S.viewer = null; } S.mod = null; $('navMod').hidden = true; setView('mods'); }
+    } catch (e) { failed.push(r.name + ' (' + cleanErr(e) + ')'); }
+  }
+  $('revertDlg').hidden = true; await loadModsFolder();
+  toast((done.length ? `Reverted: ${done.join(', ')}. What was there is kept in Backups.` : '') + (failed.length ? ` Not reverted: ${failed.join(', ')}.` : ''), 9000);
 };
 /* ---- edited mods still using their ModHub name (the game asks to "update" them) ---- */
 async function scanEdited() {
@@ -414,7 +458,7 @@ async function loadMod(zip, name, path, kind) {
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
   if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null; weldCache = new Map(); partCache = new Map();
-  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), storeBrands: new Map(), storeYears: new Map(), storeTiles: new Map(), storeTabs: new Map(), shopLogos: new Map() };
+  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), storeBrands: new Map(), storeYears: new Map(), storeTiles: new Map(), storeTabs: new Map(), shopLogos: new Map() }; try { showRevertButton(); } catch (e) {}
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);

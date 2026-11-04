@@ -52,7 +52,7 @@
           <input type="search" id="modSearch" placeholder="Search mods" aria-label="Search mods">
           <div class="segs" id="modFilter" role="group" aria-label="Show"><button type="button" data-f="all">All <span></span></button><button type="button" data-f="mine">Your copies <span></span></button><button type="button" data-f="logos">With your logos <span></span></button><button type="button" data-f="plain">Not edited <span></span></button></div>
         </div>
-        <div class="row-wrap" style="margin:-4px 0 12px"><button type="button" class="btn small" id="btnFixMods" hidden>Fix “needs updating” mods</button><button type="button" class="btn small" id="btnCheckMods" hidden>Check my mods for problems</button></div>
+        <div class="row-wrap" style="margin:-4px 0 12px"><button type="button" class="btn small" id="btnFixMods" hidden>Fix “needs updating” mods</button><button type="button" class="btn small" id="btnCheckMods" hidden>Check my mods for problems</button><button type="button" class="btn small" id="btnRevertMods" hidden>Revert mods to original</button></div>
         <div class="flagbar" id="flagBar" hidden><div><b id="flagTitle"></b><span class="muted" id="flagText"></span></div><button type="button" class="btn small primary" id="flagFix">Review and fix</button></div>
         <div class="modgrid" id="modGrid"></div>
       </div>
@@ -65,6 +65,7 @@
           <div style="min-width:0"><h1 id="modTitle"></h1><p class="mono muted" id="modFile"></p></div></div>
         <div class="vacts">
           <span class="changes" id="changeSum">No changes yet</span>
+          <button type="button" class="btn" id="btnRevertMod" hidden>Revert to original</button>
           <button type="button" class="btn" id="btnCloseMod">Close</button>
           <span class="copyopt" id="copyOpt" hidden><label class="check"><input type="checkbox" id="saveCopy"> <span>As my own copy</span></label></span>
           <button type="button" class="btn primary" id="btnSave" disabled>Save mod</button>
@@ -377,6 +378,15 @@
     <div id="checkBody" class="checkbody"></div>
     <p class="muted hint" id="checkNote">Nothing is changed until you tick a fix and click Fix the ticked problems. Each mod is backed up first (Documents\Farm Decal Swapper\Backups). A fixed ModHub mod no longer matches ModHub, so the game may say it needs updating: Fix “needs updating” mods turns it into your own copy.</p>
     <div class="edacts"><button type="button" class="btn primary" id="checkFix" disabled>Fix the ticked problems</button><button type="button" class="btn" id="checkAgain">Check again</button></div>
+  </div>
+</div>
+<div class="overlay" id="revertDlg" hidden>
+  <div class="dlgbox" role="dialog" aria-modal="true" aria-labelledby="revertHead">
+    <h2 id="revertHead">Revert mods to original</h2>
+    <p class="muted" id="revertWhat"></p>
+    <div id="revertList" class="fixlist"></div>
+    <p class="muted hint">Each ticked mod goes back to exactly how it was before the app touched it: the original file name and the original files. Your copy is renamed back (FS25_DBF_… becomes the original name again) and your savegames are switched back to it. What’s there now is kept in Documents\Farm Decal Swapper\Backups, so you can undo this too. Close the game first.</p>
+    <div class="edacts"><button type="button" class="btn danger" id="revertGo" disabled>Revert the ticked mods</button><button type="button" class="btn" id="revertClose">Cancel</button></div>
   </div>
 </div>
 <div class="overlay" id="importDlg" hidden>

@@ -167,6 +167,51 @@ ipcMain.handle('replaceOriginal', async (_e, { oldPath, oldName, newName }) => {
   }
   return { movedTo, savegames, backupDir: savegames.length ? backupRoot : null, dependents };
 });
+/* ---- putting mods back the way they were: your copy back to the original, or an edited mod back to its backup ---- */
+async function zipLooksEdited(file) { // made or changed by this app: its marker or its custom_decals folder
+  let edited = false; try { await readZipEntries(file, n => { if (/(^|\/)farm_decal_swapper\.txt$/i.test(n) || /(^|\/)custom_decals\//i.test(n)) edited = true; return false; }); } catch (e) { return null; }
+  return edited;
+}
+const stampOf = n => { const m = n.match(/_(\d{4}-\d\d-\d\d-\d\d-\d\d-\d\d)\.zip$/i); return m ? m[1] : ''; };
+ipcMain.handle('revertInfo', async (_e, { dir, tag }) => {
+  const t = String(tag || '').toLowerCase(), out = [];
+  const listZips = async d => { try { return (await fsp.readdir(d)).filter(n => /\.zip$/i.test(n)); } catch (e) { return []; } };
+  const backups = await listZips(BACKUPS()), originals = await listZips(ORIGINALS()), mods = await listZips(dir);
+  for (const file of mods) {
+    const name = file.replace(/\.zip$/i, ''), ln = name.toLowerCase(), full = path.join(dir, file);
+    let original = null;
+    if (t && ln.startsWith('fs25_' + t + '_')) original = 'FS25_' + name.slice(6 + t.length);
+    else if (t && ln.startsWith(t + '_')) original = name.slice(t.length + 1);
+    const isCopy = !!original, base = original || name;
+    const edited = isCopy || await zipLooksEdited(full); if (!edited) continue;
+    // where the untouched version is: Original mods first, then the oldest backup; an untouched one wins over an edited one
+    const cands = [];
+    for (const n of originals) if (n.toLowerCase() === (base + '.zip').toLowerCase() || n.toLowerCase().startsWith(base.toLowerCase() + '_2')) cands.push({ path: path.join(ORIGINALS(), n), kind: 'originals', stamp: stampOf(n) || '0' });
+    for (const n of backups) if (n.toLowerCase().startsWith(base.toLowerCase() + '_') && stampOf(n) && n.length === base.length + 1 + 19 + 4) cands.push({ path: path.join(BACKUPS(), n), kind: 'backup', stamp: stampOf(n) });
+    for (const c of cands) c.pristine = (await zipLooksEdited(c.path)) === false;
+    cands.sort((a, b) => (b.pristine - a.pristine) || (a.kind === 'originals' ? -1 : b.kind === 'originals' ? 1 : 0) || a.stamp.localeCompare(b.stamp));
+    const originalInMods = isCopy && mods.some(n => n.toLowerCase() === (base + '.zip').toLowerCase());
+    if (!cands.length && !originalInMods) continue;
+    out.push({ name: file, path: full, isCopy, original: base + '.zip', originalInMods, source: cands[0] || null, sources: cands.length });
+  }
+  return out;
+});
+ipcMain.handle('revertMod', async (_e, { path: modPath, isCopy, original, sourcePath, sourceKind }) => {
+  if (await gameRunning()) return { error: 'game-running' };
+  const dir = path.dirname(modPath), name = path.basename(modPath), target = isCopy ? safeJoin(dir, original) : modPath;
+  await fsp.mkdir(BACKUPS(), { recursive: true });
+  const move = async (from, to) => { try { await fsp.rename(from, to); } catch (e) { if (e.code !== 'EXDEV') throw e; await fsp.copyFile(from, to); await fsp.unlink(from); } };
+  // keep what's there now, in case you want it back
+  const kept = path.join(BACKUPS(), `${path.basename(name, '.zip')} before revert ${stamp()}.zip`); await move(modPath, kept);
+  let keptOriginal = null;
+  if (sourcePath && isCopy && fs.existsSync(target)) { keptOriginal = path.join(BACKUPS(), `${path.basename(original, '.zip')} before revert ${stamp()}.zip`); await move(target, keptOriginal); }
+  try {
+    if (sourcePath) { if (sourceKind === 'originals') await move(sourcePath, target); else await fsp.copyFile(sourcePath, target); }
+  } catch (e) { await move(kept, modPath).catch(() => {}); if (keptOriginal) await move(keptOriginal, target).catch(() => {}); throw e; } // put things back if it failed
+  let savegames = [], backupDir = null;
+  if (isCopy) { backupDir = path.join(BACKUPS(), `Savegames before reverting ${path.basename(name, '.zip')} ${stamp()}`); savegames = await retargetSavegames(path.basename(name, '.zip'), path.basename(original, '.zip'), backupDir); }
+  return { restored: target, kept, keptOriginal, savegames, backupDir: savegames.length ? backupDir : null };
+});
 ipcMain.handle('pickFolder', async (_e, current, title) => {
   const r = await dialog.showOpenDialog(win, { title: title || 'Choose your FS25 mods folder', defaultPath: current || DEFAULT_MODS(), properties: ['openDirectory'] });
   return r.canceled ? null : r.filePaths[0];
