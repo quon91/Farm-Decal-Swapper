@@ -80,7 +80,7 @@ function initSettings() {
   $('saveCopyDefault').addEventListener('change', () => { store.set('saveCopy', $('saveCopyDefault').checked ? '1' : '0'); $('saveCopy').checked = $('saveCopyDefault').checked; showCopyName(); });
   $('saveCopy').addEventListener('change', showCopyName); // just for this save
   $('replaceOrig').addEventListener('change', () => store.set('replaceOrig', $('replaceOrig').checked ? '1' : '0'));
-  $('copyTag').addEventListener('input', () => { store.set('copyTag', $('copyTag').value); showCopyName(); brandUI(); });
+  $('copyTag').addEventListener('input', () => { store.set('copyTag', $('copyTag').value); showCopyName(); brandUI(); clearTimeout(S.tagTimer); S.tagTimer = setTimeout(() => scanEdited(), 700); });
   $('brandOn').checked = pref('brandOn', DEF.brandOn ? '1' : '0') === '1'; $('brandTitle').value = pref('brandTitle', DEF.brandTitle || '');
   $('brandOn').addEventListener('change', () => { store.set('brandOn', $('brandOn').checked ? '1' : '0'); brandUI(); });
   $('brandTitle').addEventListener('input', () => { store.set('brandTitle', $('brandTitle').value); brandUI(); });
@@ -317,7 +317,7 @@ $('flagFix').onclick = () => {
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = f.edited && !f.scriptsUseName; cb.dataset.path = f.path;
     const t = document.createElement('div');
     t.innerHTML = '<b></b><span class="mono muted"></span><span class="muted"></span>';
-    t.children[0].textContent = f.title; t.children[1].textContent = `${f.name} → ${copyName(f.name)}`;
+    t.children[0].textContent = f.title; t.children[1].textContent = `${f.name} → ${copyName(f.name, f.oldCopy)}`;
     t.children[2].textContent = (f.reasons.length ? f.reasons.join('; ') + '.' : 'No sign of edits from this app, but a mod edited elsewhere (or patched earlier) can still be flagged.') + (f.scriptsUseName ? ' Its scripts mention its own file name, so renaming it could break it.' : '');
     row.append(cb, t); box.appendChild(row);
   });
@@ -335,7 +335,7 @@ $('fixGo').onclick = async () => {
   for (const f of picks) {
     try {
       say(`Making ${f.name} your copy…`); await tick();
-      const newName = copyName(f.name), z = await JSZip.loadAsync(await APP.readFile(f.path));
+      const newName = copyName(f.name, f.oldCopy), z = await JSZip.loadAsync(await APP.readFile(f.path));
       const mdKey = Object.keys(z.files).filter(k => /(^|\/)moddesc\.xml$/i.test(k)).sort((a, b) => a.length - b.length)[0];
       if (mdKey) { const raw = await z.file(mdKey).async('uint8array'), bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF;
         z.file(mdKey, new TextEncoder().encode((bom ? '\uFEFF' : '') + Core.tagModTitle(new TextDecoder().decode(raw).replace(/^\uFEFF/, ''), copyTag()))); }
@@ -343,7 +343,9 @@ $('fixGo').onclick = async () => {
       const data = new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE', compressionOptions: { level: 6 } }));
       const w = await APP.writeNewZip({ dir: S.modsDir, name: newName, data });
       if (w.error === 'exists') { failed.push(`${f.name}: ${newName} already exists. Delete or rename one of them first.`); continue; }
-      const r = await APP.replaceOriginal({ oldPath: f.path, oldName: f.name.replace(/\.zip$/i, ''), newName: newName.replace(/\.zip$/i, '') });
+      // an older copy: savegames switch to the new name and the old file goes to Backups; a ModHub-named mod: the original goes to Original mods
+      const r = await APP.replaceOriginal({ oldPath: f.oldCopy ? null : f.path, oldName: f.name.replace(/\.zip$/i, ''), newName: newName.replace(/\.zip$/i, '') });
+      if (!r.error && f.oldCopy) await APP.moveToBackups(f.path);
       if (r.error) { failed.push(`${f.name}: ${r.error === 'game-running' ? 'the game started while fixing' : r.error}`); continue; }
       done.push(`${newName}${r.savegames.length ? ` (switched ${r.savegames.map(s => s.savegame).join(', ')})` : ''}${r.dependents && r.dependents.length ? `; the old file stays because ${r.dependents.join(', ')} needs it` : ''}`);
     } catch (e) { failed.push(`${f.name}: ${cleanErr(e)}`); }
@@ -2063,8 +2065,10 @@ const copyTag = () => ($('copyTag').value || '').replace(/[^A-Za-z0-9]+/g, '') |
 function originalOf(base) { const t = copyTag(), m = base.match(new RegExp('^(FS\\d\\d)_' + t + '_(.+)$', 'i')); if (m) return m[1] + '_' + m[2];
   if (base.toLowerCase().startsWith(t.toLowerCase() + '_')) return base.slice(t.length + 1); if (base.toLowerCase().endsWith('_' + t.toLowerCase())) return base.slice(0, -t.length - 1); return base; }
 function isCopyName(base) { const t = copyTag().toLowerCase(), b = base.toLowerCase(); return b.startsWith(`fs25_${t}_`) || b.startsWith(`${t}_`) || b.endsWith(`_${t}`); }
-function copyName(name) {
-  const base = name.replace(/\.zip$/i, ''), t = copyTag(); if (isCopyName(base)) return base + '.zip';
+function copyName(name, upgrade) { // upgrade: also give an older copy name (DBF_X, X_DBF) today's form
+  const base = name.replace(/\.zip$/i, ''), t = copyTag(), lb = base.toLowerCase(), lt = t.toLowerCase();
+  if (upgrade && !lb.startsWith(`fs25_${lt}_`)) { if (lb.startsWith(lt + '_')) return copyName(base.slice(t.length + 1)); if (lb.endsWith('_' + lt)) return copyName(base.slice(0, -t.length - 1)); }
+  if (isCopyName(base)) return base + '.zip';
   const m = base.match(/^(FS\d\d)_(.+)$/i); return (m ? `${m[1]}_${t}_${m[2]}` : `FS25_${t}_${base}`) + '.zip'; // always FS25_TAG_…, so your copies sit together
 }
 const savingCopy = () => !!(S.mod && S.mod.kind !== 'folder' && $('saveCopy').checked);

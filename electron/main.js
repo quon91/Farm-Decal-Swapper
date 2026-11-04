@@ -134,17 +134,19 @@ ipcMain.handle('scanEdited', async (_e, { dir, tag }) => {
   for (const d of await fsp.readdir(dir, { withFileTypes: true })) {
     if (!d.isFile() || !/\.zip$/i.test(d.name)) continue;
     const full = path.join(dir, d.name), base = d.name.replace(/\.zip$/i, ''), lb = base.toLowerCase();
-    if (t && (lb.startsWith('fs25_' + t + '_') || lb.startsWith(t + '_') || lb.endsWith('_' + t))) continue; // already your copy
+    if (t && lb.startsWith('fs25_' + t + '_')) continue; // already your copy, with today's name
+    const oldCopy = t && (lb.startsWith(t + '_') || lb.endsWith('_' + t)); // your copy under an older name (DBF_X or X_DBF)
     let decals = false, marker = false, md = null, lua = [];
     try { const e = await readZipEntries(full, n => { if (/(^|\/)custom_decals\//i.test(n)) decals = true; if (/(^|\/)farm_decal_swapper\.txt$/i.test(n)) marker = true; return /(^|\/)moddesc\.xml$/i.test(n) || /\.lua$/i.test(n); });
       for (const [k, v] of Object.entries(e)) { if (/moddesc\.xml$/i.test(k)) md = v.toString('utf8'); else lua.push(v.toString('utf8')); } } catch (e) { continue; }
     if (!md) continue;
     const reasons = [];
-    if (marker) reasons.push('was edited with Farm Decal Swapper');
+    if (oldCopy) reasons.push('is your copy under an older name');
+    else if (marker) reasons.push('was edited with Farm Decal Swapper');
     else if (decals) reasons.push('has logos added by Farm Decal Swapper');
     if (backups.some(b => b.startsWith(lb + '_20'))) reasons.push('was saved over by Farm Decal Swapper (a backup of it exists)');
     const title = (md.match(/<title>[\s\S]*?<en>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/en>/i) || [])[1] || base;
-    out.push({ name: d.name, path: full, title: title.trim(), reasons, edited: reasons.length > 0, scriptsUseName: lua.some(s => s.includes(base)) });
+    out.push({ name: d.name, path: full, title: title.trim(), reasons, edited: reasons.length > 0, oldCopy: !!oldCopy, scriptsUseName: lua.some(s => s.includes(base)) });
   }
   return out;
 });
