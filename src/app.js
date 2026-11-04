@@ -142,15 +142,47 @@ const wellFormedXml = t => /^\s*(<\?xml[^>]*>\s*)?<i3D\b/.test(t) ? null : xmlPr
 async function checkOne(m, installed) {
   const data = await APP.modCheckData(m.path); if (!data || data.error) return { mod: m, error: data ? data.error : 'unreadable', problems: [] };
   const heads = {}; for (const [k, b64] of Object.entries(data.heads || {})) { try { const bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); heads[k] = Core.ddsHead(u8); } catch (e) {} }
-  const r = ModCheck.analyze({ name: m.name, names: data.names, texts: data.texts, sizes: data.sizes, heads }, { wellFormed: wellFormedXml, installed, oldCatMod: `FS25_${copyTag()}_Categories` });
+  const r = ModCheck.analyze({ name: m.name, names: data.names, texts: data.texts, sizes: data.sizes, heads }, { wellFormed: wellFormedXml, installed, oldCatMod: `FS25_${copyTag()}_Categories`, brandMod: brandModName(), ownBrands: CHECK.own, gameBrands: CHECK.game, brandModBrands: CHECK.brandModBrands });
   const mdName = data.names.find(n => /(^|\/)moddesc\.xml$/i.test(n));
   return { mod: m, prefix: r.prefix, problems: r.problems, names: data.names.length, modDesc: mdName ? data.texts[mdName] || '' : '' };
+}
+async function checkBrandInfo() { // your brands, the game's brands, and what your brand mod has: so a mod that needs the brand mod is told why
+  try { await gameBrands(); } catch (e) {}
+  CHECK.game = gameBrandKeys(); CHECK.own = new Set([brandKey(), ...myBrandKeys()]); CHECK.brandModBrands = null;
+  const bm = (S.mods || []).find(x => x.kind === 'zip' && x.name.toLowerCase() === (brandModName() + '.zip').toLowerCase());
+  if (bm) try { const z = await JSZip.loadAsync(await APP.readFile(bm.path)), f = Object.keys(z.files).find(k => /(^|\/)moddesc\.xml$/i.test(k));
+    if (f) CHECK.brandModBrands = new Set(Core.modBrands(await z.file(f).async('string')).map(b => String(b.name).toUpperCase())); } catch (e) {}
+  for (const b of CHECK.brandModBrands || []) CHECK.own.add(b);
+}
+/** The original of one of your copies (Original mods, else the oldest untouched backup), opened: { zip, prefix } or null. */
+async function originalZip(path) {
+  const rv = REVERT.list.find(x => x.path === path), src = rv && rv.source ? rv.source.path : rv && rv.originalInMods ? path.replace(/[^\\/]+$/, rv.original) : null;
+  if (!src) return null; const z = await JSZip.loadAsync(await APP.readFile(src)), md = Object.keys(z.files).find(k => /(^|\/)moddesc\.xml$/i.test(k));
+  return { zip: z, prefix: md ? md.slice(0, md.length - 'modDesc.xml'.length) : '' };
+}
+/** When the original is gone: the game's own shop category / build-menu place nearest to one of the old tiles or tabs. */
+async function gameCategoryGuess(oldName) {
+  const w = oldName.toLowerCase().replace(/^[a-z0-9]+_/, ''), map = { trucks: 'trucks', tractors: 'tractorsM', trailers: 'trailers', tools: 'misc', equipment: 'misc', misc: 'misc' };
+  let guess = map[w] || 'misc';
+  for (const f of ['shared/storeCategories.xml', 'store/storeCategories.xml']) { const u8 = await gameFile(f); if (!u8) continue;
+    const names = [...new TextDecoder().decode(u8).matchAll(/<category\b[^>]*\bname="([^"]+)"/g)].map(m => m[1]);
+    if (names.length && !names.some(n => n.toLowerCase() === guess.toLowerCase())) guess = names.find(n => n.toLowerCase().startsWith(w.slice(0, 5))) || names.find(n => /^misc/i.test(n)) || guess; break; }
+  return guess;
+}
+async function gameBrushGuess(tab) {
+  const w = String(tab || '').toLowerCase(); let out = { category: 'buildings', tab: 'sheds' };
+  for (const f of ['shared/constructionCategories.xml', 'store/constructionCategories.xml', 'shared/construction/constructionCategories.xml']) { const u8 = await gameFile(f); if (!u8) continue;
+    const cats = [...new TextDecoder().decode(u8).matchAll(/<category\b[^>]*\bname="([^"]+)"[^>]*>([\s\S]*?)<\/category>/g)].map(m => ({ name: m[1], tabs: [...m[2].matchAll(/<tab\b[^>]*\bname="([^"]+)"/g)].map(t => t[1]) }));
+    const all = cats.flatMap(c => c.tabs.map(t => ({ category: c.name, tab: t }))); if (!all.length) break;
+    out = all.find(x => x.tab.toLowerCase() === w) || all.find(x => x.tab.toLowerCase().startsWith(w.slice(0, 4))) || all.find(x => x.tab.toLowerCase() === 'sheds') || all[0]; break; }
+  return out;
 }
 async function runCheck(only) {
   if (CHECK.running) return; CHECK.running = true; $('checkDlg').hidden = false; $('checkFix').disabled = true; $('checkBody').innerHTML = '';
   const zips = S.mods.filter(m => m.kind === 'zip' && (!only || only.includes(m.path)));
   const installed = new Set(S.mods.map(m => m.name.replace(/\.zip$/i, '').toLowerCase()));
   const out = only ? CHECK.results.filter(r => !only.includes(r.mod.path)) : [];
+  await checkBrandInfo();
   for (let i = 0; i < zips.length; i++) {
     $('checkWhat').textContent = `Checking ${i + 1} of ${zips.length}: ${zips[i].title || zips[i].name}…`; await tick();
     try { out.push(await checkOne(zips[i], installed)); } catch (e) { out.push({ mod: zips[i], error: cleanErr(e), problems: [] }); }
@@ -184,7 +216,7 @@ function drawCheck() {
     for (const p of r.problems) {
       nProb++; let box = null;
       if (p.fix) { nFix++; box = document.createElement('input'); box.type = 'checkbox'; box.checked = !!p.ticked; box.setAttribute('aria-label', 'Fix this'); box.onchange = () => { p.ticked = box.checked; $('checkFix').disabled = !CHECK.results.some(x => x.problems.some(q => q.ticked)); }; }
-      card.appendChild(item(p.kind === 'dependency' || p.kind === 'missing' || p.kind === 'nomoddesc' ? 'err' : 'warn', p.fix ? '' : '!', [txt(p.msg + (p.fix ? (p.kind === 'png' || p.kind === 'bigtex' ? ' Tick to convert.' : ' Tick to fix.') : ''))], box));
+      card.appendChild(item(p.kind === 'dependency' || p.kind === 'missing' || p.kind === 'nomoddesc' || (p.kind === 'ownbrand' && /isn’t in your mods folder|doesn’t have/.test(p.msg)) ? 'err' : 'warn', p.fix ? '' : '!', [txt(p.msg + (p.fix ? (p.kind === 'png' || p.kind === 'bigtex' ? ' Tick to convert.' : ' Tick to fix.') : ''))], box));
     }
     if (logs.length) { nLog += logs.length; const kinds = [...new Set(logs.map(l => l.kind))], lg = document.createElement('div'); lg.className = 'checklog';
       lg.appendChild(txt(`From the game’s log (${logs.length} message${logs.length === 1 ? '' : 's'}). ` + kinds.map(k => ModCheck.LOG_HELP[k]).filter(Boolean).join(' ')));
@@ -205,30 +237,43 @@ $('checkFix').onclick = async () => {
   if (APP.gameRunning && await APP.gameRunning()) { toast('Close the game first: it keeps mods open while it runs.'); return; }
   const todo = CHECK.results.filter(r => r.problems.some(p => p.ticked)).sort((a, b) => (a.problems.some(p => p.kind === 'retire') ? 1 : 0) - (b.problems.some(p => p.kind === 'retire') ? 1 : 0)); // the old section mod goes last
   $('checkFix').disabled = true; const done = [], failed = [];
-  if (todo.some(r => r.problems.some(p => p.ticked && p.kind === 'owncats'))) await loadRevertInfo(); // where each mod's original is
+  if (todo.some(r => r.problems.some(p => p.ticked && (p.kind === 'owncats' || p.kind === 'ownbrand')))) await loadRevertInfo(); // where each mod's original is
+  const guessed = [];
   for (const r of todo) {
     try {
       if (r.problems.some(p => p.ticked && p.kind === 'retire')) { const res = await APP.moveToBackups(r.mod.path); if (res.error) throw new Error(res.error === 'game-running' ? 'close the game first' : res.error); done.push(r.mod.path); continue; }
       $('checkWhat').textContent = `Fixing ${r.mod.title || r.mod.name}…`; await tick();
       const z = await JSZip.loadAsync(await APP.readFile(r.mod.path)), texts = {};
       for (const n of Object.keys(z.files)) if (/\.(xml|i3d)$/i.test(n) && !z.files[n].dir) texts[n] = await z.file(n).async('string');
-      const { write, move, textures, uncat } = ModCheck.applyFixes({ texts }, r.prefix, r.problems.filter(p => p.ticked));
+      const { write, move, textures, uncat, unbrand } = ModCheck.applyFixes({ texts }, r.prefix, r.problems.filter(p => p.ticked));
       for (const [k, v] of write) z.file(k, v);
-      if (uncat) { // shop tile and build-menu place back to what the original mod has
-        const rv = REVERT.list.find(x => x.path === r.mod.path), srcPath = rv && rv.source ? rv.source.path : rv && rv.originalInMods ? r.mod.path.replace(/[^\\/]+$/, rv.original) : null;
-        if (!srcPath) throw new Error('its original isn’t in Original mods or Backups, so the game’s categories can’t be looked up: use Revert to original instead');
-        const oz = await JSZip.loadAsync(await APP.readFile(srcPath)), omd = Object.keys(oz.files).find(k => /(^|\/)moddesc\.xml$/i.test(k)), op = omd ? omd.slice(0, omd.length - 'modDesc.xml'.length) : '';
+      const orig = uncat || unbrand ? await originalZip(r.mod.path).catch(() => null) : null, origText = async n => { if (!orig) return null; const f = orig.zip.file(orig.prefix + n.slice(r.prefix.length)); return f ? f.async('string') : null; };
+      const cur = n => write.has(n) ? write.get(n) : texts[n]; let guessedHere = false;
+      if (uncat) { // shop tile and build-menu place back to what the original mod has (or the nearest game one when the original is gone)
         const key = copyTag().toUpperCase().replace(/[^A-Z0-9]/g, '');
-        for (const n of Object.keys(texts).filter(n => /\.xml$/i.test(n))) {
-          let t = write.has(n) ? write.get(n) : texts[n]; const cat = Core.storeCategoryOf(t), b = Core.brushOf(t);
-          if (!(cat.toUpperCase().startsWith(key + '_') || (b && b.category.toLowerCase() === key.toLowerCase() + '_farms'))) continue;
-          const of = oz.file(op + n.slice(r.prefix.length)); if (!of) continue; const o = await of.async('string');
-          const oc = Core.storeCategoryOf(o); if (oc) t = Core.setStoreCategory(t, oc);
-          const ob = (o.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0].match(/<brush>[\s\S]*?<\/brush>/);
-          t = t.replace(/(<storeData>[\s\S]*?)(\s*<brush>[\s\S]*?<\/brush>)([\s\S]*?<\/storeData>)/, (m, a, br, c) => a + (ob ? br.replace(/<brush>[\s\S]*?<\/brush>/, ob[0]) : '') + c);
-          z.file(n, t);
+        for (const n of Object.keys(texts).filter(n => /\.xml$/i.test(n) && !/moddesc\.xml$/i.test(n))) {
+          let t = cur(n); const cat = Core.storeCategoryOf(t), b = Core.brushOf(t), mine = cat.toUpperCase().startsWith(key + '_'), myBrush = b && b.category.toLowerCase() === key.toLowerCase() + '_farms';
+          if (!mine && !myBrush) continue; const o = await origText(n);
+          if (o) { const oc = Core.storeCategoryOf(o); if (mine && oc) t = Core.setStoreCategory(t, oc);
+            const ob = (o.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0].match(/<brush>[\s\S]*?<\/brush>/);
+            if (myBrush) t = t.replace(/(<storeData>[\s\S]*?)(\s*<brush>[\s\S]*?<\/brush>)([\s\S]*?<\/storeData>)/, (m, a, br, c) => a + (ob ? br.replace(/<brush>[\s\S]*?<\/brush>/, ob[0]) : '') + c); }
+          else { guessedHere = true;
+            if (mine) t = Core.setStoreCategory(t, await gameCategoryGuess(cat));
+            if (myBrush) { const g = await gameBrushGuess(b.tab); t = Core.setBrush(t, g.category, g.tab); } }
+          write.set(n, t); z.file(n, t);
         }
       }
+      if (unbrand) { // items listed under your own brands get the brand the original mod had (LIZARD, the game's own, when the original is gone)
+        const own = CHECK.own || new Set(), game = CHECK.game || new Set();
+        for (const n of Object.keys(texts).filter(n => /\.xml$/i.test(n) && !/moddesc\.xml$/i.test(n))) {
+          let t = cur(n); const b = Core.storeBrandOf(t).toUpperCase(); if (!b || !(own.has(b) || (game.size && !game.has(b)))) continue;
+          const o = await origText(n), ob = o ? Core.storeBrandOf(o) : null;
+          if (o && !ob) t = t.replace(/(<storeData>[\s\S]*?)\s*<brand>[\s\S]*?<\/brand>/, '$1'); // the original had none
+          else { if (!o) guessedHere = true; t = Core.setStoreBrand(t, ob || 'LIZARD'); }
+          write.set(n, t); z.file(n, t);
+        }
+      }
+      if (guessedHere) guessed.push(r.mod.title || r.mod.name);
       // textures: PNG/JPG pictures become compressed DDS (with smaller versions for distance); uncompressed DDS get compressed
       let ti = 0;
       for (const t of textures) {
@@ -249,7 +294,7 @@ $('checkFix').onclick = async () => {
       if (!w || !w.saved) throw new Error('not saved'); done.push(r.mod.path);
     } catch (e) { failed.push((r.mod.title || r.mod.name) + ' (' + cleanErr(e) + ')'); }
   }
-  toast(`Fixed ${done.length} mod${done.length === 1 ? '' : 's'}.` + (failed.length ? ' Not fixed: ' + failed.join(', ') : ''));
+  toast(`Fixed ${done.length} mod${done.length === 1 ? '' : 's'}.` + (guessed.length ? ` No original found for ${guessed.join(', ')}, so the game’s nearest category (or LIZARD for a brand) was used: check ${guessed.length === 1 ? 'it' : 'them'} in the shop.` : '') + (failed.length ? ' Not fixed: ' + failed.join(', ') : ''));
   if (todo.some(r => r.problems.some(p => p.ticked && p.kind === 'retire'))) { await loadModsFolder(); CHECK.results = CHECK.results.filter(r => S.mods.some(m => m.path === r.mod.path)); }
   await runCheck(done.filter(p => S.mods.some(m => m.path === p))); // look at the fixed ones again
 };
@@ -2022,12 +2067,14 @@ function fitInto(src, W, H, pad) { const c = document.createElement('canvas'); c
 async function writeBrandMod(descVersion) { // the small mod that creates the brand; rewritten each time so logo and name stay current
   const l = logoById($('brandLogo').value) || S.lib[0]; if (!l) throw new Error('add a logo to your library first');
   const z = new JSZip(), img = (lg, W, H) => { const c = fitInto(lg.canvas, W, H, 0.04); return Core.encodeDDS(c.getContext('2d').getImageData(0, 0, W, H).data, W, H, 'lossless'); };
-  const game = gameBrandKeys(), brands = [];
-  for (const b of allBrands()) { if (game.has(b.key) && !b.main) continue; const lg = logoById(b.logo) || (b.main ? l : null); if (!lg) continue; // a brand needs a picture
+  const game = gameBrandKeys(), brands = [], skipped = [];
+  for (const b of allBrands()) { if (game.has(b.key) && !b.main) continue; const lg = logoById(b.logo) || (b.main ? l : null); if (!lg) { skipped.push(b.title); continue; } // a brand needs a picture
     const image = b.main ? 'brand.dds' : `brands/${b.key.toLowerCase()}.dds`; z.file(image, img(lg, 512, 256)); brands.push({ name: b.key, title: b.title, image }); }
   z.file('modDesc.xml', Core.brandModDesc({ descVersion, title: brandTitle(), brands })); z.file('icon.dds', img(l, 256, 256));
   const data = new Uint8Array(await z.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }));
-  return APP.writeNewZip({ dir: S.modsDir, name: brandModName() + '.zip', data, overwrite: true });
+  const w = await APP.writeNewZip({ dir: S.modsDir, name: brandModName() + '.zip', data, overwrite: true });
+  if (w && w.saved && skipped.length) toast(`${skipped.join(', ')} ${skipped.length === 1 ? 'has' : 'have'} no logo yet, so ${skipped.length === 1 ? 'it isn’t' : 'they aren’t'} in ${brandModName()}.zip: items listed under ${skipped.length === 1 ? 'it' : 'them'} won’t load. Pick a logo in Settings → My brands.`);
+  return w;
 }
 /** Brand every vehicle in a mod's XML texts and make its modDesc depend on the brand mod. texts: Map(rel -> text); returns how many vehicles. */
 function brandTexts(get, set, rels, mdRel) {

@@ -121,4 +121,15 @@ test('textures: DXT1 for solid pictures, DXT5 with see-through, header tells the
   const raw = Core.encodeDDS(px, W, H, 'lossless'), hr = Core.ddsHead(raw); assert.ok(!hr.compressed && hr.bytesPerPixel === 4);
   assert.ok(d1.length < d5.length && d5.length < raw.length);
 });
+test('mod check: a mod that needs a missing brand mod gets a fix that drops the requirement', () => {
+  const MC = require('../src/modcheck.js');
+  const md = '<modDesc>\n    <dependencies>\n        <dependency>FS25_MY_Brand</dependency>\n        <dependency>FS25_MY_Categories</dependency>\n    </dependencies>\n</modDesc>\n';
+  const mod = { name: 'FS25_MY_Truck.zip', names: ['modDesc.xml', 'truck.xml'], texts: { 'modDesc.xml': md, 'truck.xml': '<vehicle><storeData><name>T</name><brand>MYFARMS</brand><category>MY_TRUCKS</category></storeData></vehicle>' } };
+  const r = MC.analyze(mod, { installed: new Set(), oldCatMod: 'FS25_MY_Categories', brandMod: 'FS25_MY_Brand', ownBrands: new Set(['MYFARMS']) });
+  assert.deepStrictEqual(r.problems.map(p => p.kind).sort(), ['ownbrand', 'owncats']);
+  const f = MC.applyFixes(mod, r.prefix, r.problems);
+  assert.ok(f.uncat && f.unbrand); assert.ok(!/dependenc/.test(f.write.get('modDesc.xml')));
+  const ok = MC.analyze(mod, { installed: new Set(['fs25_my_brand']), oldCatMod: 'FS25_MY_Categories', brandMod: 'FS25_MY_Brand', ownBrands: new Set(['MYFARMS']), brandModBrands: new Set(['MYFARMS']) });
+  assert.ok(!ok.problems.some(p => p.kind === 'ownbrand' || p.kind === 'dependency'));
+});
 console.log(`\n${n} tests passed`);

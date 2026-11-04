@@ -94,15 +94,33 @@ function analyze(mod, opts = {}) {
     if (lower(mod.name.replace(/\.zip$/i, '')) === lower(opts.oldCatMod)) add('retire', '', 'This is the shop-section and build-menu mod the app made before. You don’t use it any more: take it out of your mods folder (it’s kept in Backups). Fix the mods that still use it first (tick them too).', { type: 'retire' });
     else if (new RegExp('<dependency>\\s*' + opts.oldCatMod + '\\s*</dependency>', 'i').test(mdText)) add('owncats', 'modDesc.xml', 'Still uses your old shop section and build-menu tabs. Put its items back in the game’s own categories (taken from the original mod) and drop that requirement.', { type: 'uncat' });
   }
+  // your brand mod: needed only while the mod's items are listed under one of your own brands
+  const needsDep = name => name && new RegExp('<dependency>\\s*' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*</dependency>', 'i').test(mdText);
+  if (opts.brandMod && needsDep(opts.brandMod) && lower(mod.name.replace(/\.zip$/i, '')) !== lower(opts.brandMod)) {
+    const own = opts.ownBrands || new Set(), game = opts.gameBrands || new Set(), used = new Set();
+    for (const [k, t] of texts) { if (!/\.xml$/i.test(k) || lower(k) === 'moddesc.xml') continue;
+      const b = (((t.match(/<storeData>[\s\S]*?<\/storeData>/) || [''])[0].match(/<brand>\s*([^<]*?)\s*<\/brand>/) || [])[1] || '').toUpperCase();
+      if (b && b !== 'NONE' && (own.has(b) || (game.size && !game.has(b)))) used.add(b); }
+    const list = [...used].join(', '), installed = opts.installed && opts.installed.has(lower(opts.brandMod));
+    const missing = installed && opts.brandModBrands ? [...used].filter(b => !opts.brandModBrands.has(b)) : [];
+    if (!used.size) add('ownbrand', 'modDesc.xml', `Lists your brand mod (${opts.brandMod}) as needed, but nothing in it uses your brands any more. Drop that requirement.`, { type: 'unbrand' });
+    else if (!installed) add('ownbrand', 'modDesc.xml', `Needs your brand mod ${opts.brandMod}, which isn’t in your mods folder (its items are listed under ${list}). Tick to put back the brand the original mod had and drop that requirement. To keep your brand instead, use “Update my brand mod now” in Settings, then check again.`, { type: 'unbrand' });
+    else if (missing.length) add('ownbrand', 'modDesc.xml', `Is listed under ${missing.join(', ')}, which your brand mod ${opts.brandMod} doesn’t have, so the game can’t find that brand. Use “Update my brand mod now” in Settings to add it, or tick to put back the brand the original mod had.`, { type: 'unbrand' });
+  }
   if (opts.installed) for (const m of mdText.matchAll(/<dependency>\s*([^<]+?)\s*<\/dependency>/g))
-    if (!(opts.oldCatMod && lower(m[1]) === lower(opts.oldCatMod)) && !opts.installed.has(lower(m[1]))) add('dependency', 'modDesc.xml', `Needs the mod “${m[1]}”, which isn’t in your mods folder. Without it this mod doesn’t load.`);
+    if (!(opts.oldCatMod && lower(m[1]) === lower(opts.oldCatMod)) && !(opts.brandMod && lower(m[1]) === lower(opts.brandMod)) && !opts.installed.has(lower(m[1]))) add('dependency', 'modDesc.xml', `Needs the mod “${m[1]}”, which isn’t in your mods folder. Without it this mod doesn’t load.`);
   return { prefix, problems };
 }
 
+/** Take one requirement out of a modDesc (and the <dependencies> block if that leaves it empty). which: RegExp for the mod name */
+function dropDependency(md, which) {
+  const t = md.replace(new RegExp('[ \\t]*<dependency>\\s*' + which.source + '\\s*</dependency>[ \\t]*\\r?\\n?', 'gi'), '');
+  return t.replace(/[ \t]*<dependencies>\s*<\/dependencies>[ \t]*\r?\n?/i, '').replace(/[ \t]*<dependencies\s*\/>[ \t]*\r?\n?/i, '');
+}
 /** Changed files for the ticked fixes. texts: { entryName: text } (full zip names);
     returns { write: Map(name -> text), move: prefix|null, textures: [{ op: 'png2dds' | 'compress', path, keep }] } (paths inside the mod) */
 function applyFixes(mod, prefix, fixes) {
-  const write = new Map(), textures = []; let move = null, uncat = false, retire = false;
+  const write = new Map(), textures = []; let move = null, uncat = false, unbrand = false, retire = false;
   const get = f => write.has(prefix + f) ? write.get(prefix + f) : (mod.texts[prefix + f] || '').replace(/^\uFEFF/, '');
   for (const p of fixes) {
     const fx = p.fix; if (!fx) continue;
@@ -119,10 +137,12 @@ function applyFixes(mod, prefix, fixes) {
         write.set(prefix + u.file, get(u.file).replace(new RegExp(`="${esc(u.raw)}"`, 'g'), `="${to}"`).replace(new RegExp(`>(\\s*)${esc(u.raw)}(\\s*)<`, 'g'), `>$1${to}$2<`)); }
     }
     else if (fx.type === 'compress') for (const it of fx.items) textures.push({ op: 'compress', path: it.path });
-    else if (fx.type === 'uncat') { const md = Object.keys(mod.texts).find(k => k.startsWith(prefix) && /(^|\/)moddesc\.xml$/i.test(k)); if (md) write.set(md, get(md.slice(prefix.length)).replace(/[ \t]*<dependency>\s*FS25_[A-Za-z0-9]+_Categories\s*<\/dependency>[ \t]*\r?\n?/i, '')); uncat = true; }
+    else if (fx.type === 'uncat' || fx.type === 'unbrand') { const md = Object.keys(mod.texts).find(k => k.startsWith(prefix) && /(^|\/)moddesc\.xml$/i.test(k));
+      if (md) write.set(md, dropDependency(get(md.slice(prefix.length)), fx.type === 'uncat' ? /FS25_[A-Za-z0-9]+_Categories/ : /FS25_[A-Za-z0-9]+_Brand/));
+      if (fx.type === 'uncat') uncat = true; else unbrand = true; }
     else if (fx.type === 'retire') retire = true;
   }
-  return { write, move, textures, uncat, retire };
+  return { write, move, textures, uncat, unbrand, retire };
 }
 
 /** Mods that load the same thing twice. mods: [{ name, path, title, version, names, modDesc }] */
