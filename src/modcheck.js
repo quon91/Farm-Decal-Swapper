@@ -40,7 +40,9 @@ function analyze(mod, opts = {}) {
     for (const q of [p, toDDS(p)]) { const list = byBase.get(lower(base(q))); if (list && list.length === 1) return list[0]; }
     return null;
   };
-  const texts = Object.entries(mod.texts).filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k.slice(prefix.length), v.replace(/^\uFEFF/, '')]);
+  const allTexts = Object.entries(mod.texts).filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k.slice(prefix.length), v.replace(/^\uFEFF/, '')]);
+  const texts = allTexts.filter(([k]) => /\.(xml|i3d)$/i.test(k)), luas = allTexts.filter(([k]) => /\.lua$/i.test(k)).map(([, v]) => v.toLowerCase());
+  const pngUse = new Map(); // picture files (PNG/JPG) the mod's models and XML use: path -> [{ file, raw, from }]
   for (const [file, text] of texts) {
     // 1. XML the game can't read
     const bad = opts.wellFormed ? opts.wellFormed(text) : null;
@@ -61,6 +63,8 @@ function analyze(mod, opts = {}) {
       const raw = r.raw.trim(); if (!raw || /^\$data/i.test(raw) || !REF_EXT.test(raw) || raw.includes('$') && !/^\$moddir\$/i.test(raw)) continue;
       const clean = raw.replace(/^\$moddir\$[^/\\]*[/\\]?/i, '').replace(/\\/g, '/');
       const cands = r.from === 'dir' ? [norm(dirOf(file) + clean)] : [norm(clean), norm(dirOf(file) + clean)]; // XML paths count from the mod folder (sometimes from the file's own folder)
+      const hit = cands.find(c => have.has(c));
+      if (hit && /\.(png|jpe?g)$/i.test(hit) && !have.has(toDDS(hit))) { if (!pngUse.has(hit)) pngUse.set(hit, []); pngUse.get(hit).push({ file, raw, from: r.from }); }
       if (cands.some(exists) || seen.has(raw)) continue; seen.add(raw);
       if (/\.shapes$/i.test(raw)) continue;
       const like = findLike(cands[0]);
@@ -71,16 +75,29 @@ function analyze(mod, opts = {}) {
       } else add('missing', file, `${file} points to “${raw}”, which isn’t in the mod. The mod is probably incomplete: download it again.`);
     }
   }
-  // 3. mods it needs
+  // 3. textures that cost the graphics card more than they need to
+  if (pngUse.size) {
+    const items = [...pngUse].map(([path, uses]) => ({ path, uses, keep: luas.some(t => t.includes(lower(base(path)))) })), mb = items.reduce((a, it) => a + ((mod.sizes || {})[prefix + it.path] || 0), 0) / 1048576;
+    add('png', '', `${items.length} texture${items.length === 1 ? ' is a PNG/JPG picture' : 's are PNG/JPG pictures'}${mb ? ` (${mb.toFixed(1)} MB)` : ''}. The game has to unpack ${items.length === 1 ? 'it' : 'them'} into full-size video memory with no smaller versions for distance, which costs more VRAM and load time than DDS. Convert to compressed DDS: ${items.slice(0, 4).map(i => base(i.path)).join(', ')}${items.length > 4 ? ', …' : ''}.`, { type: 'png2dds', items });
+  }
+  if (mod.heads) {
+    const big = Object.entries(mod.heads).filter(([k, h]) => k.startsWith(prefix) && h && !h.compressed && h.bytesPerPixel && h.width * h.height >= 256 * 256).map(([k, h]) => ({ path: k.slice(prefix.length), h }));
+    if (big.length) {
+      const now = big.reduce((a, b) => a + b.h.width * b.h.height * b.h.bytesPerPixel * 4 / 3, 0) / 1048576, after = big.reduce((a, b) => a + b.h.width * b.h.height * 4 / 3, 0) / 1048576;
+      add('bigtex', '', `${big.length} texture${big.length === 1 ? ' is' : 's are'} stored uncompressed, using about ${now.toFixed(0)} MB of video memory; compressed (DXT1/DXT5) ${big.length === 1 ? 'it' : 'they'} would use about ${(after / 2).toFixed(0)}–${after.toFixed(0)} MB. Slight quality loss. Files: ${big.slice(0, 4).map(b => base(b.path)).join(', ')}${big.length > 4 ? ', …' : ''}.`, { type: 'compress', items: big.map(b => ({ path: b.path })) });
+    }
+  }
+  // 4. mods it needs
   const mdText = (texts.find(([k]) => lower(k) === 'moddesc.xml') || [])[1] || '';
   if (opts.installed) for (const m of mdText.matchAll(/<dependency>\s*([^<]+?)\s*<\/dependency>/g))
     if (!opts.installed.has(lower(m[1]))) add('dependency', 'modDesc.xml', `Needs the mod “${m[1]}”, which isn’t in your mods folder. Without it this mod doesn’t load.`);
   return { prefix, problems };
 }
 
-/** Changed files for the ticked fixes. texts: { entryName: text } (full zip names); returns { write: Map(name -> text), move: prefix|null } */
+/** Changed files for the ticked fixes. texts: { entryName: text } (full zip names);
+    returns { write: Map(name -> text), move: prefix|null, textures: [{ op: 'png2dds' | 'compress', path, keep }] } (paths inside the mod) */
 function applyFixes(mod, prefix, fixes) {
-  const write = new Map(); let move = null;
+  const write = new Map(), textures = []; let move = null;
   const get = f => write.has(prefix + f) ? write.get(prefix + f) : (mod.texts[prefix + f] || '').replace(/^\uFEFF/, '');
   for (const p of fixes) {
     const fx = p.fix; if (!fx) continue;
@@ -91,8 +108,14 @@ function applyFixes(mod, prefix, fixes) {
         .replace(new RegExp(`="${esc(fx.from)}"`, 'g'), `="${fx.to}"`).replace(new RegExp(`>(\\s*)${esc(fx.from)}(\\s*)<`, 'g'), `>$1${fx.to}$2<`);
       write.set(prefix + p.file, t);
     }
+    else if (fx.type === 'png2dds') for (const it of fx.items) { // the DDS goes next to the picture; references now name the DDS
+      textures.push({ op: 'png2dds', path: it.path, keep: it.keep });
+      for (const u of it.uses) { const to = u.raw.replace(/\.(png|jpe?g)$/i, '.dds'), esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        write.set(prefix + u.file, get(u.file).replace(new RegExp(`="${esc(u.raw)}"`, 'g'), `="${to}"`).replace(new RegExp(`>(\\s*)${esc(u.raw)}(\\s*)<`, 'g'), `>$1${to}$2<`)); }
+    }
+    else if (fx.type === 'compress') for (const it of fx.items) textures.push({ op: 'compress', path: it.path });
   }
-  return { write, move };
+  return { write, move, textures };
 }
 
 /** Mods that load the same thing twice. mods: [{ name, path, title, version, names, modDesc }] */

@@ -117,4 +117,11 @@ test('own categories: shop tile and build-menu tab set on items, script lists th
   assert.ok(lua.includes('"DBF_TRUCKS"') && lua.includes('"SHEDS"') && lua.includes('"DBF_FARMS"') && lua.includes('"Delta \\"Bottom\\""'));
   assert.ok(Core.categoriesModDesc({ key: 'DBF', title: 'X & Y', tiles: [], tabs: [] }).includes('scripts/DBFCategories.lua'));
 });
+test('textures: DXT1 for solid pictures, DXT5 with see-through, header tells them apart', () => {
+  const W = 16, H = 8, px = new Uint8ClampedArray(W * H * 4); for (let i = 0; i < px.length; i += 4) { px[i] = i % 255; px[i + 1] = 100; px[i + 2] = 50; px[i + 3] = 255; }
+  const d1 = Core.encodeDDS(px, W, H, 'auto'), h1 = Core.ddsHead(d1); assert.strictEqual(h1.fmt, 'BC1'); assert.ok(h1.compressed && !Core.decodeDDS(d1).error);
+  px[3] = 0; const d5 = Core.encodeDDS(px, W, H, 'auto'); assert.strictEqual(Core.ddsHead(d5).fmt, 'BC3');
+  const raw = Core.encodeDDS(px, W, H, 'lossless'), hr = Core.ddsHead(raw); assert.ok(!hr.compressed && hr.bytesPerPixel === 4);
+  assert.ok(d1.length < d5.length && d5.length < raw.length);
+});
 console.log(`\n${n} tests passed`);

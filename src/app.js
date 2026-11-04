@@ -141,7 +141,8 @@ function xmlProblem(text) { // what the game's XML reader would complain about, 
 const wellFormedXml = t => /^\s*(<\?xml[^>]*>\s*)?<i3D\b/.test(t) ? null : xmlProblem(t); // the exporter writes i3d files; only hand-edited XML goes wrong
 async function checkOne(m, installed) {
   const data = await APP.modCheckData(m.path); if (!data || data.error) return { mod: m, error: data ? data.error : 'unreadable', problems: [] };
-  const r = ModCheck.analyze({ name: m.name, names: data.names, texts: data.texts }, { wellFormed: wellFormedXml, installed });
+  const heads = {}; for (const [k, b64] of Object.entries(data.heads || {})) { try { const bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); heads[k] = Core.ddsHead(u8); } catch (e) {} }
+  const r = ModCheck.analyze({ name: m.name, names: data.names, texts: data.texts, sizes: data.sizes, heads }, { wellFormed: wellFormedXml, installed });
   const mdName = data.names.find(n => /(^|\/)moddesc\.xml$/i.test(n));
   return { mod: m, prefix: r.prefix, problems: r.problems, names: data.names.length, modDesc: mdName ? data.texts[mdName] || '' : '' };
 }
@@ -183,7 +184,7 @@ function drawCheck() {
     for (const p of r.problems) {
       nProb++; let box = null;
       if (p.fix) { nFix++; box = document.createElement('input'); box.type = 'checkbox'; box.checked = !!p.ticked; box.setAttribute('aria-label', 'Fix this'); box.onchange = () => { p.ticked = box.checked; $('checkFix').disabled = !CHECK.results.some(x => x.problems.some(q => q.ticked)); }; }
-      card.appendChild(item(p.kind === 'dependency' || p.kind === 'missing' || p.kind === 'nomoddesc' ? 'err' : 'warn', p.fix ? '' : '!', [txt(p.msg + (p.fix ? ' Tick to fix.' : ''))], box));
+      card.appendChild(item(p.kind === 'dependency' || p.kind === 'missing' || p.kind === 'nomoddesc' ? 'err' : 'warn', p.fix ? '' : '!', [txt(p.msg + (p.fix ? (p.kind === 'png' || p.kind === 'bigtex' ? ' Tick to convert.' : ' Tick to fix.') : ''))], box));
     }
     if (logs.length) { nLog += logs.length; const kinds = [...new Set(logs.map(l => l.kind))], lg = document.createElement('div'); lg.className = 'checklog';
       lg.appendChild(txt(`From the game’s log (${logs.length} message${logs.length === 1 ? '' : 's'}). ` + kinds.map(k => ModCheck.LOG_HELP[k]).filter(Boolean).join(' ')));
@@ -208,8 +209,21 @@ $('checkFix').onclick = async () => {
       $('checkWhat').textContent = `Fixing ${r.mod.title || r.mod.name}…`; await tick();
       const z = await JSZip.loadAsync(await APP.readFile(r.mod.path)), texts = {};
       for (const n of Object.keys(z.files)) if (/\.(xml|i3d)$/i.test(n) && !z.files[n].dir) texts[n] = await z.file(n).async('string');
-      const { write, move } = ModCheck.applyFixes({ texts }, r.prefix, r.problems.filter(p => p.ticked));
+      const { write, move, textures } = ModCheck.applyFixes({ texts }, r.prefix, r.problems.filter(p => p.ticked));
       for (const [k, v] of write) z.file(k, v);
+      // textures: PNG/JPG pictures become compressed DDS (with smaller versions for distance); uncompressed DDS get compressed
+      let ti = 0;
+      for (const t of textures) {
+        const name = r.prefix + t.path, f = z.file(name); if (!f) continue;
+        $('checkWhat').textContent = `${r.mod.title || r.mod.name}: texture ${++ti} of ${textures.length} (${baseName(t.path)})…`; await tick();
+        let rgba, W, H;
+        if (t.op === 'png2dds') { const bmp = await createImageBitmap(new Blob([await f.async('uint8array')])); W = Math.ceil(bmp.width / 4) * 4; H = Math.ceil(bmp.height / 4) * 4; // block sizes need multiples of 4
+          const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, W, H); rgba = g.getImageData(0, 0, W, H).data; }
+        else { const d = Core.decodeDDS(await f.async('uint8array')); if (d.error) continue; rgba = d.rgba; W = d.width; H = d.height; if (W % 4 || H % 4) continue; }
+        const normal = /(_|\b)(normal|nrm|nm|n)\.(dds|png|jpe?g)$/i.test(t.path); // normal maps keep DXT5's better quality
+        z.file(r.prefix + Core.toDDS(t.path.replace(/\.jpe?g$/i, '.dds')), Core.encodeDDS(rgba, W, H, normal ? 'dxt5' : 'auto'));
+        if (t.op === 'png2dds' && !t.keep) z.remove(name);
+      }
       let out = z;
       if (move) { out = new JSZip(); for (const n of Object.keys(z.files)) { const f = z.files[n]; if (f.dir) continue; out.file(n.startsWith(move) ? n.slice(move.length) : n, await f.async('uint8array')); } }
       const data = new Uint8Array(await (await out.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })).arrayBuffer());
@@ -484,7 +498,8 @@ function renderLib() {
     const nm = el.querySelector('input[type=text]'); nm.value = l.name;
     const fo = document.createElement('input'); fo.type = 'text'; fo.className = 'folder'; fo.placeholder = 'Folder'; fo.setAttribute('list', 'folderNames'); fo.setAttribute('aria-label', 'Folder'); fo.value = folderOf(l);
     fo.addEventListener('change', () => { l.folder = fo.value.trim(); saveRec(l); renderLib(); refreshLogos(); }); nm.after(fo);
-    nm.addEventListener('change', () => { l.name = nm.value.trim() || 'Logo'; nm.value = l.name; saveRec(l); refreshLogos(); });
+    nm.addEventListener('change', () => { l.name = nm.value.trim() || 'Logo'; nm.value = l.name; saveRec(l); refreshLogos();
+      if (APP && usesOf(l).some(u => (u.logos[l.id].xmls || []).length && u.logos[l.id].name !== l.name)) openUses(l); }); // offer to rename it in the shops of mods that have it
     const nUse = usesOf(l).length;
     if (nUse) { const ub = document.createElement('button'); ub.type = 'button'; ub.className = 'linkish'; ub.textContent = `Used in ${nUse} mod${nUse === 1 ? '' : 's'}`; ub.onclick = () => openUses(l); el.querySelector('.dim').after(ub); }
     else if (APP) { const ub = document.createElement('button'); ub.type = 'button'; ub.className = 'linkish'; ub.textContent = 'Which mods use it?'; ub.onclick = () => openUses(l); el.querySelector('.dim').after(ub); }
@@ -545,6 +560,11 @@ function noteLogoUses(path, name, prefix, changed) {
   for (const c of changed) if (c.logo) add(c.logo, 'sticker', prefix + c.rel);
   for (const [, ed] of M.edits) if (ed.mode === 'logo' && ed.logo && ed.regions.some(r => r.on)) add(ed.logo, 'other');
   for (const [k, g] of M.groups) if (g.on) for (const id of g.logos) add(id, 'other');
+  for (const [, st] of M.shopLogos || []) if (st.on) for (const id of st.logos) add(id, 'other');
+  // where the shop shows each logo's name (choices named after it), so a renamed logo can rename them too
+  const xmls = changed.filter(c => /\.xml$/i.test(c.rel) && !/moddesc\.xml$/i.test(c.rel)).map(c => [prefix + c.rel, new TextDecoder().decode(c.data)]);
+  for (const [id, e] of Object.entries(logos)) { const l = logoById(id), q = 'name="' + l.name.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '"';
+    e.name = l.name; e.xmls = xmls.filter(([, t]) => t.includes(q)).map(([k]) => k); }
   const all = logoUses(); for (const k of Object.keys(all)) if (all[k].path === M.path && k !== path) delete all[k]; // the original moved away: its uses moved to the copy
   if (Object.keys(logos).length) all[path] = { path, name, t: Date.now(), logos: Object.assign((all[path] || {}).logos || {}, logos) }; else delete all[path];
   store.set('logoUses', JSON.stringify(all)); renderLib();
@@ -558,10 +578,12 @@ function openUses(l) {
   for (const u of list) { const e = u.logos[l.id], row = document.createElement('div'); row.className = 'fixrow';
     const parts = []; if (e.stickers.length) parts.push(`${e.stickers.length} placed-logo picture${e.stickers.length === 1 ? '' : 's'}`); if (e.other) parts.push(`${e.other} texture or shop choice${e.other === 1 ? '' : 's'}`);
     row.innerHTML = '<div style="min-width:0"><div class="t"></div><div class="m muted"></div></div>'; row.querySelector('.t').textContent = u.name; row.querySelector('.m').textContent = parts.join(' · ') + (u.t ? ' · saved ' + new Date(u.t).toLocaleDateString() : ''); box.appendChild(row); }
-  const can = list.some(u => u.logos[l.id].stickers.length), other = list.some(u => u.logos[l.id].other);
+  const renamed = u => { const e = u.logos[l.id]; return e.name && e.name !== l.name && e.xmls && e.xmls.length; };
+  const can = list.some(u => u.logos[l.id].stickers.length || renamed(u)), other = list.some(u => u.logos[l.id].other);
+  if (list.some(renamed)) $('usesWhat').textContent += ` The shop still calls it “${list.find(renamed).logos[l.id].name}” there: updating renames those shop choices to “${l.name}”.`;
   $('usesUpdate').hidden = !can || !APP; $('usesScan').hidden = !APP;
   $('usesNote').textContent = (can ? 'Update these mods puts the current version of the logo in place of the old one in their placed logos (each mod is backed up first). ' : '') +
-    (other ? 'Logos painted into a mod’s own textures or decal shop choices can’t be swapped from here: open that mod and apply the logo again.' : '');
+    (other ? 'Logos painted into a mod’s own textures or decal shop choices can’t be swapped from here (their shop names can): open that mod and apply the logo again for the new picture.' : '');
   $('usesDlg').hidden = false;
 }
 $('usesClose').onclick = () => { $('usesDlg').hidden = true; };
@@ -577,17 +599,22 @@ $('usesScan').onclick = async () => { // mods saved before the app kept track: t
 };
 function ddsSize(u8) { const v = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); return u8.length > 20 && v.getUint32(0, true) === 0x20534444 ? { h: v.getUint32(12, true), w: v.getUint32(16, true) } : null; }
 $('usesUpdate').onclick = async () => {
-  const l = USES.logo; if (!l) return; const list = usesOf(l).filter(u => u.logos[l.id].stickers.length);
+  const l = USES.logo; if (!l) return; const list = usesOf(l).filter(u => u.logos[l.id].stickers.length || (u.logos[l.id].name && u.logos[l.id].name !== l.name && (u.logos[l.id].xmls || []).length));
   if (APP.gameRunning && await APP.gameRunning()) { toast('Close the game first: it keeps mods open while it runs.'); return; }
   $('usesUpdate').disabled = true; let done = 0, stretched = 0; const failed = [];
   for (const u of list) {
     try {
       $('usesWhat').textContent = `Updating ${u.name}…`; await tick();
       const z = await JSZip.loadAsync(await APP.readFile(u.path)), e = u.logos[l.id]; let n = 0;
+      if (e.name && e.name !== l.name) for (const x of e.xmls || []) { const f = z.file(x); if (!f) continue; // shop choices named after the logo get its new name
+        const ea = v => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'), raw = await f.async('uint8array'), bom = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF;
+        const t = new TextDecoder().decode(raw).replace(/^\uFEFF/, ''), t2 = t.split('name="' + ea(e.name) + '"').join('name="' + ea(l.name) + '"');
+        if (t2 !== t) { z.file(x, new TextEncoder().encode((bom ? '\uFEFF' : '') + t2)); n++; } }
+      if (e.name !== l.name) e.name = l.name;
       for (const rel of e.stickers) { const f = z.file(rel); if (!f) continue; const sz = ddsSize(await f.async('uint8array')); if (!sz) continue;
         const c = document.createElement('canvas'); c.width = sz.w; c.height = sz.h; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(l.canvas, 0, 0, sz.w, sz.h);
         z.file(rel, Core.encodeDDS(g.getImageData(0, 0, sz.w, sz.h).data, sz.w, sz.h, quality())); n++; }
-      if (!n) { failed.push(u.name + ' (logo not found in it)'); continue; }
+      if (!n) { failed.push(u.name + ' (nothing of this logo found in it)'); continue; }
       if (e.aspect && Math.abs(l.canvas.width / l.canvas.height - e.aspect) / e.aspect > 0.05) stretched++;
       const data = new Uint8Array(await (await z.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })).arrayBuffer());
       const dir = u.path.replace(/[\\/][^\\/]+$/, ''), name = u.path.slice(dir.length + 1);
@@ -2342,7 +2369,7 @@ async function lmSave() {
   const c = await lmRender(1), blob = await canvasBlob(c);
   l.canvas = trimCanvas(c); l.original = blob; l.recipe = lmRecipe(); l.name = $('lmName').value.trim() || l.name; l.cleaned = true; l.needsBg = false;
   await saveRec(l); renderLib(); refreshLogos(); lmEditUI();
-  if (APP && usesOf(l).some(u => u.logos[l.id].stickers.length)) openUses(l); // offer to update the mods that already have it
+  if (APP && usesOf(l).some(u => u.logos[l.id].stickers.length || ((u.logos[l.id].xmls || []).length && u.logos[l.id].name !== l.name))) openUses(l); // offer to update the mods that already have it
   else toast(`“${l.name}” updated. Mods use the new version the next time you save them.`);
 }
 async function lmAdd() {

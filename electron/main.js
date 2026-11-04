@@ -195,13 +195,30 @@ ipcMain.handle('gameDataDir', async (_e, dir) => {
   return null;
 });
 /* ---- mod check: what's inside a mod (names, sizes, and its XML/i3d text), and the game's log ---- */
+function readZipMeta(file) { // every name and size, the start of each DDS (its header), and the text of XML, i3d and Lua files
+  return new Promise((resolve, reject) => {
+    yauzl.open(file, { lazyEntries: true, autoClose: true }, (err, zip) => {
+      if (err) return reject(err);
+      const names = [], sizes = {}, heads = {}, texts = {}; zip.readEntry();
+      zip.on('entry', entry => {
+        const n = entry.fileName; if (n.endsWith('/')) return zip.readEntry();
+        names.push(n); sizes[n] = entry.uncompressedSize;
+        const isText = /\.(xml|i3d|lua)$/i.test(n) && entry.uncompressedSize <= 8e6, isDds = /\.dds$/i.test(n);
+        if (!isText && !isDds) return zip.readEntry();
+        zip.openReadStream(entry, (e2, rs) => {
+          if (e2) return zip.readEntry();
+          const chunks = []; let got = 0, done = false;
+          const finish = () => { if (done) return; done = true; const b = Buffer.concat(chunks); if (isText) texts[n] = b.toString('utf8'); else heads[n] = b.subarray(0, 148).toString('base64'); zip.readEntry(); };
+          rs.on('data', c => { chunks.push(c); got += c.length; if (isDds && got >= 148) { rs.unpipe(); rs.destroy(); finish(); } });
+          rs.on('end', finish); rs.on('error', finish); rs.on('close', finish);
+        });
+      });
+      zip.on('end', () => resolve({ names, sizes, heads, texts })); zip.on('error', reject);
+    });
+  });
+}
 ipcMain.handle('modCheckData', async (_e, file) => {
-  const names = [], texts = {};
-  try {
-    const got = await readZipEntries(file, n => { if (!n.endsWith('/')) names.push(n); return /\.(xml|i3d)$/i.test(n); });
-    for (const [k, v] of Object.entries(got)) texts[k] = v.toString('utf8');
-  } catch (e) { return { error: String(e.message || e) }; }
-  return { names, texts };
+  try { return await readZipMeta(file); } catch (e) { return { error: String(e.message || e) }; }
 });
 ipcMain.handle('readGameLog', async () => {
   const p = path.join(GAME_DIR(), 'log.txt');

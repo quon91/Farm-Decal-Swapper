@@ -238,6 +238,35 @@ function downsample(rgba, w, h) { // alpha-weighted 2x2 box filter
   return { rgba: out, w: nw, h: nh };
 }
 
+/** DXT1 (BC1) with mips: the colour half of a BC3 block is a valid 4-colour BC1 block (endpoints are kept c0 >= c1). */
+function encodeBC1(rgba, W, H) {
+  const levels = [{ rgba, w: W, h: H }];
+  while (levels[levels.length - 1].w > 1 || levels[levels.length - 1].h > 1) { const l = levels[levels.length - 1]; levels.push(downsample(l.rgba, l.w, l.h)); }
+  const sizes = levels.map(l => Math.max(1, (l.w + 3) >> 2) * Math.max(1, (l.h + 3) >> 2) * 8);
+  const out = new Uint8Array(128 + sizes.reduce((a, b) => a + b, 0)), dv = new DataView(out.buffer);
+  dv.setUint32(0, 0x20534444, true); dv.setUint32(4, 124, true); dv.setUint32(8, 0x1 | 0x2 | 0x4 | 0x1000 | 0x20000 | 0x80000, true);
+  dv.setUint32(12, H, true); dv.setUint32(16, W, true); dv.setUint32(20, sizes[0], true); dv.setUint32(28, levels.length, true);
+  dv.setUint32(76, 32, true); dv.setUint32(80, 4, true); dv.setUint32(84, FOURCC('DXT1'), true);
+  dv.setUint32(108, 0x1000 | 0x400000 | 0x8, true);
+  let o = 128; const px = new Uint8Array(64), tmp = new Uint8Array(16);
+  for (const l of levels) {
+    const bw = Math.max(1, (l.w + 3) >> 2), bh = Math.max(1, (l.h + 3) >> 2);
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++, o += 8) {
+      for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+        const sx = Math.min(l.w - 1, bx * 4 + x), sy = Math.min(l.h - 1, by * 4 + y), i = (sy * l.w + sx) * 4, p = (y * 4 + x) * 4;
+        px[p] = l.rgba[i]; px[p + 1] = l.rgba[i + 1]; px[p + 2] = l.rgba[i + 2]; px[p + 3] = 255;
+      }
+      encodeBC3Block(px, tmp, 0); out.set(tmp.subarray(8, 16), o);
+    }
+  }
+  return out;
+}
+/** What a DDS header says about how a texture is stored: { width, height, fmt, compressed, bytesPerPixel }. */
+function ddsHead(u8) {
+  const i = ddsInfo(u8); if (i.error) return null;
+  const compressed = typeof i.fmt === 'string' && /^BC\d$/.test(i.fmt), bpp = compressed ? (/^BC[14]$/.test(i.fmt) ? 0.5 : 1) : typeof i.fmt === 'object' && i.fmt ? i.fmt.bitCount / 8 : /RGBA8|BGRA8|BGRX8/.test(i.fmt) ? 4 : null;
+  return { width: i.width, height: i.height, fmt: typeof i.fmt === 'object' ? 'uncompressed ' + i.fmt.bitCount + '-bit' : i.fmt, compressed, bytesPerPixel: bpp };
+}
 /** Uncompressed 32-bit DDS (8.8.8.8 ARGB) with a full mip chain: no quality loss. */
 function encodeLossless(rgba, W, H) {
   const levels = [{ rgba, w: W, h: H }];
@@ -253,8 +282,11 @@ function encodeLossless(rgba, W, H) {
   return out;
 }
 
-/** Encode RGBA to a DDS with a full mip chain: mode 'lossless' (default) or 'dxt5'. */
+/** Encode RGBA to a DDS with a full mip chain: mode 'lossless' (default), 'dxt5', 'dxt1' (no see-through, half the size of DXT5),
+    or 'auto' (DXT1 when every pixel is solid, else DXT5). */
 function encodeDDS(rgba, W, H, mode) {
+  if (mode === 'auto') { let solid = true; for (let i = 3; i < rgba.length; i += 4) if (rgba[i] < 250) { solid = false; break; } mode = solid ? 'dxt1' : 'dxt5'; }
+  if (mode === 'dxt1') return encodeBC1(rgba, W, H);
   if (mode !== 'dxt5') return encodeLossless(rgba, W, H);
   const levels = [{ rgba, w: W, h: H }];
   while (levels[levels.length - 1].w > 1 || levels[levels.length - 1].h > 1) { const l = levels[levels.length - 1]; levels.push(downsample(l.rgba, l.w, l.h)); }
@@ -1128,7 +1160,7 @@ function relPath(fromFile, toFile) {
   return '../'.repeat(a.length - k) + b.slice(k).join('/');
 }
 
-return { normPath, modBrands, categoriesLua, categoriesModDesc, storeCategoryOf, brushOf, isPlaceableXml, setStoreCategory, setBrush, storeBrandOf, storeYearOf, setStoreYear, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
+return { normPath, ddsHead, modBrands, categoriesLua, categoriesModDesc, storeCategoryOf, brushOf, isPlaceableXml, setStoreCategory, setBrush, storeBrandOf, storeYearOf, setStoreYear, setStoreBrand, addDependency, brandModDesc, matToEuler, addLicensePlates, licensePlateSpots, removeLicensePlates, nodePaths, sceneChildCount, vehicleI3d, freeDesignSlot, addSwitchConfig, modTexts, configItems, renameConfigItems, storeName, setStoreName, tagModTitle, weldMesh, wrapDecal, emptyShapesFile, mat, mmul, buildShapeEntity, appendShapeEntities, readAllShapes, maxShapeId, insertAll, relPath, dirOf, toDDS, resolveRef, kids, find, findAll,
   ddsInfo, decodeDDS, encodeDDS, parseXML, analyzeMod, analyzeI3D, indexShapes, readShape, addConfigOption, slug, normPath };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
