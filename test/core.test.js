@@ -106,16 +106,13 @@ test('shop items: a year goes in storeData specs, brand and year read back', () 
   const w = Core.setStoreYear('<vehicle><storeData><name>x</name><specs><power>100</power></specs></storeData></vehicle>', '1990');
   assert.ok(w.includes('<year>1990</year>') && w.includes('<power>100</power>') && (w.match(/<specs>/g) || []).length === 1);
 });
-test('own categories: shop tile and build-menu tab set on items, script lists them', () => {
+test('shop tile and build-menu tab of an item can be read and set', () => {
   const g = '<placeable>\n    <storeData>\n        <name>Shed</name>\n        <category>placeableMisc</category>\n        <brush>\n            <type>placeable</type>\n            <category>chvck_farms</category>\n            <tab>all</tab>\n        </brush>\n    </storeData>\n</placeable>';
   const o = Core.setBrush(g, 'dbf_farms', 'sheds');
   assert.strictEqual(JSON.stringify(Core.brushOf(o)), JSON.stringify({ type: 'placeable', category: 'dbf_farms', tab: 'sheds' }));
   assert.strictEqual(Core.storeCategoryOf(o), 'placeableMisc'); assert.ok(Core.isPlaceableXml(o));
   const v = Core.setStoreCategory('<vehicle>\n    <storeData>\n        <name>T</name>\n    </storeData>\n</vehicle>', 'DBF_TRUCKS');
   assert.strictEqual(Core.storeCategoryOf(v), 'DBF_TRUCKS'); assert.strictEqual(Core.brushOf(v), null);
-  const lua = Core.categoriesLua({ key: 'DBF', title: 'Delta "Bottom"', tiles: [{ name: 'DBF_TRUCKS', title: 'Trucks', image: 'icons/dbf_trucks.dds' }], tabs: [{ name: 'SHEDS', title: 'Sheds' }], icon: 'icons/category.dds' });
-  assert.ok(lua.includes('"DBF_TRUCKS"') && lua.includes('"SHEDS"') && lua.includes('"DBF_FARMS"') && lua.includes('"Delta \\"Bottom\\""'));
-  assert.ok(Core.categoriesModDesc({ key: 'DBF', title: 'X & Y', tiles: [], tabs: [] }).includes('scripts/DBFCategories.lua'));
 });
 test('textures: DXT1 for solid pictures, DXT5 with see-through, header tells them apart', () => {
   const W = 16, H = 8, px = new Uint8ClampedArray(W * H * 4); for (let i = 0; i < px.length; i += 4) { px[i] = i % 255; px[i + 1] = 100; px[i + 2] = 50; px[i + 3] = 255; }

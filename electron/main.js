@@ -179,9 +179,10 @@ ipcMain.handle('revertInfo', async (_e, { dir, tag }) => {
   const backups = await listZips(BACKUPS()), originals = await listZips(ORIGINALS()), mods = await listZips(dir);
   for (const file of mods) {
     const name = file.replace(/\.zip$/i, ''), ln = name.toLowerCase(), full = path.join(dir, file);
-    let original = null;
-    if (t && ln.startsWith('fs25_' + t + '_')) original = 'FS25_' + name.slice(6 + t.length);
+    let original = null, alt = null;
+    if (t && ln.startsWith('fs25_' + t + '_')) { original = 'FS25_' + name.slice(6 + t.length); alt = name.slice(6 + t.length); } // a mod without FS25_ in its name became FS25_TAG_name
     else if (t && ln.startsWith(t + '_')) original = name.slice(t.length + 1);
+    if (alt && !originals.concat(backups, mods).some(n => n.toLowerCase().startsWith(original.toLowerCase())) && originals.concat(backups, mods).some(n => n.toLowerCase().startsWith(alt.toLowerCase()))) original = alt;
     const isCopy = !!original, base = original || name;
     const edited = isCopy || await zipLooksEdited(full); if (!edited) continue;
     // where the untouched version is: Original mods first, then the oldest backup; an untouched one wins over an edited one
@@ -195,6 +196,11 @@ ipcMain.handle('revertInfo', async (_e, { dir, tag }) => {
     out.push({ name: file, path: full, isCopy, original: base + '.zip', originalInMods, source: cands[0] || null, sources: cands.length });
   }
   return out;
+});
+ipcMain.handle('moveToBackups', async (_e, file) => { // takes a mod out of the mods folder, kept in Backups
+  if (await gameRunning()) return { error: 'game-running' };
+  await fsp.mkdir(BACKUPS(), { recursive: true }); const to = path.join(BACKUPS(), `${path.basename(file, '.zip')} removed ${stamp()}.zip`);
+  try { await fsp.rename(file, to); } catch (e) { if (e.code !== 'EXDEV') throw e; await fsp.copyFile(file, to); await fsp.unlink(file); } return { movedTo: to };
 });
 ipcMain.handle('revertMod', async (_e, { path: modPath, isCopy, original, sourcePath, sourceKind }) => {
   if (await gameRunning()) return { error: 'game-running' };
