@@ -111,8 +111,8 @@ document.querySelectorAll('.nav').forEach(b => b.addEventListener('click', () =>
 function setTab(t) {
   S.tab = t;
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
-  for (const id of ['logos', 'place', 'options', 'textures', 'files']) $('tab-' + id).hidden = id !== t;
-  if (t === 'textures') renderAll(); if (t === 'logos') renderLikely(); if (t === 'files') renderFiles(); if (t === 'place') initPlace(); if (t === 'options') renderOpts();
+  for (const id of ['logos', 'place', 'options', 'specs', 'textures', 'files']) $('tab-' + id).hidden = id !== t;
+  if (t === 'textures') renderAll(); if (t === 'logos') renderLikely(); if (t === 'files') renderFiles(); if (t === 'place') initPlace(); if (t === 'options') renderOpts(); if (t === 'specs') renderSpecs();
 }
 document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 
@@ -524,7 +524,7 @@ async function loadMod(zip, name, path, kind) {
   } catch (e) {}
   const entries = names.filter(p => p.startsWith(prefix)).map(p => ({ rel: p.slice(prefix.length), size: zip.files[p]._data && zip.files[p]._data.uncompressedSize || 0 }));
   if (S.viewer) { S.viewer.dispose(); S.viewer = null; } loadedModel = null; weldCache = new Map(); partCache = new Map();
-  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), storeBrands: new Map(), storeYears: new Map(), shopLogos: new Map() }; try { showRevertButton(); } catch (e) {}
+  S.mod = { zip, name, path, kind, prefix, files, entries, analysis, title, icon, logs, edits: new Map(), groups: new Map(), textEdits: new Map(), thumbs: new Map(), fileSel: null, stickers: [], plates: [], models: listModels(files), place: null, renames: new Map(), storeNames: new Map(), storeBrands: new Map(), storeYears: new Map(), shopLogos: new Map(), specs: new Map() }; try { showRevertButton(); } catch (e) {}
   status(null);
   $('modTitle').textContent = title; $('modFile').textContent = (path || name) + (logs.length ? ' · some models couldn’t be read' : '');
   const ic = $('modIcon'); ic.getContext('2d').clearRect(0, 0, 64, 64); if (icon) drawIcon(ic, icon);
@@ -1085,6 +1085,52 @@ async function fillBrandNames(dl) {
   try { for (const [k, t] of await gameBrands()) if (!list.has(k)) list.set(k, t); } catch (e) {}
   dl.innerHTML = ''; for (const [k, t] of list) { const o = document.createElement('option'); o.value = k; o.label = t; dl.appendChild(o); }
 }
+/* ---- specs: working speed, capacity, engine, unload speed, weight, price ---- */
+const specLinkOn = () => store.get('specLink') !== '0';
+function specPlan() { // [[xml, { count, auto }]] for the shop items with a real change
+  const out = []; if (!S.mod || !S.mod.specs) return out;
+  for (const [xml, m] of S.mod.specs) { if (!m.size) continue; try { const r = Specs.apply(xmlText(xml), m, { link: specLinkOn() }); if (r.count) out.push([xml, r]); } catch (e) {} }
+  return out;
+}
+const specCount = spc => (spc || []).reduce((a, [, r]) => a + r.count, 0);
+function renderSpecs() {
+  const box = $('specList'); box.innerHTML = ''; if (!S.mod) return;
+  $('specLink').checked = specLinkOn();
+  const items = storeItems(); let any = false;
+  for (const s of items) {
+    let t; try { t = xmlText(s.xml); } catch (e) { continue; }
+    const fs = Specs.fields(t); if (!fs.length) continue; any = true;
+    const m = S.mod.specs.get(s.xml) || new Map(), res = Specs.apply(t, m, { link: specLinkOn() }), now = new Map(Specs.fields(res.text).map(f => [f.id, f.value]));
+    const sec = document.createElement('div'); sec.className = 'opts names';
+    const head = document.createElement('div'); head.className = 'opthead'; head.innerHTML = '<div class="row-between"><h3></h3><button type="button" class="btn small">Put back</button></div><span class="mono muted"></span>';
+    head.querySelector('h3').textContent = (s.name && s.name.text) || baseName(s.xml); head.querySelector('.mono').textContent = s.xml;
+    const back = head.querySelector('button'); back.hidden = !m.size; back.onclick = () => { S.mod.specs.delete(s.xml); updateChanges(); renderSpecs(); };
+    sec.appendChild(head);
+    if (S.mod.textEdits.has(s.xml)) { const n = document.createElement('p'); n.className = 'muted hint'; n.style.padding = '0 16px 12px'; n.textContent = 'You edited this file by hand in Files, so these can’t be changed here until you revert it there.'; sec.appendChild(n); box.appendChild(sec); continue; }
+    let group = '';
+    for (const f of fs) {
+      if (f.group !== group) { group = f.group; const g = document.createElement('div'); g.className = 'specgroup'; g.textContent = group; sec.appendChild(g); }
+      const row = document.createElement('label'); row.className = 'specrow';
+      row.innerHTML = '<span class="what"><span></span><small></small></span><input type="text" inputmode="decimal" autocomplete="off"><span class="unit"></span><span class="was"></span>';
+      row.querySelector('.what span').textContent = f.label; row.querySelector('small').textContent = f.hint; row.querySelector('.unit').textContent = f.unit;
+      const inp = row.querySelector('input'), typed = m.get(f.id), shown = typed != null ? typed : f.add ? (now.get('speed:vehicle/base/speedLimit#0') || '') : (now.get(f.id) || f.value);
+      inp.value = shown; inp.placeholder = f.add ? 'none' : f.value; inp.setAttribute('aria-label', f.label);
+      const was = row.querySelector('.was'), changed = f.add ? !!String(shown).trim() : String(shown).trim() !== '' && +shown !== +f.value;
+      row.classList.toggle('changed', changed); was.textContent = changed ? (f.add ? 'added' : `was ${f.value}`) + (typed == null ? ' · matched' : '') : '';
+      inp.onchange = () => {
+        const v = inp.value.trim().replace(',', '.'), ok = v === '' || /^-?\d+(\.\d+)?$/.test(v) && +v >= 0; inp.classList.toggle('bad', !ok); if (!ok) { toast('Type a number, like 40 or 2.5.'); return; }
+        const mm = S.mod.specs.get(s.xml) || new Map();
+        if (v === '' || (!f.add && +v === +f.value)) mm.delete(f.id); else mm.set(f.id, v);
+        if (mm.size) S.mod.specs.set(s.xml, mm); else S.mod.specs.delete(s.xml);
+        updateChanges(); renderSpecs();
+      };
+      sec.appendChild(row);
+    }
+    box.appendChild(sec);
+  }
+  if (!any) box.innerHTML = '<div class="empty">This mod has no working speed, capacity, engine or price values to change.</div>';
+}
+$('specLink').onchange = e => { store.set('specLink', e.target.checked ? '1' : '0'); updateChanges(); renderSpecs(); };
 function renderOpts() {
   const box = $('optList'); box.innerHTML = ''; if (!S.mod) return;
   if (BRANDS.dir !== GAME.dir) gameBrands().then(() => { if (S.mod && !$('tab-options').hidden) renderOpts(); }).catch(() => {}); // the game's brand list, once
@@ -1980,7 +2026,8 @@ function plan() {
   const stk = S.mod.stickers.filter(st => logoById(st.logo));
   const ren = renamePlan(), pla = S.mod.plates.filter(p => p.style === 'mine' || vehiclesUsing(p.i3d).length);
   const pic = S.mod.shopPics ? [...S.mod.shopPics.keys()] : [];
-  return { tex, grp, txt, stk, ren, pla, pic };
+  const spc = specPlan();
+  return { tex, grp, txt, stk, ren, pla, pic, spc };
 }
 function nameCount(ren) { let n = 0; for (const e of ren.values()) { n += (e.store ? 1 : 0) + (e.brand ? 1 : 0) + (e.year ? 1 : 0) + (e.tile ? 1 : 0) + (e.tab ? 1 : 0); for (const m of e.sets.values()) n += m.size; } return n; }
 /** A fingerprint of everything you changed, so a mod you just saved doesn't count as unsaved. */
@@ -1989,15 +2036,17 @@ function changeSig() {
   try { return JSON.stringify({ e: [...M.edits].map(([k, e]) => [k, e.mode, e.logo, e.color, e.regions.map(r => r.on)]), s: M.stickers.map(x => [x.id, x.logo, x.point, x.width, x.rot, x.mirror, x.wrap]),
     p: M.plates.map(x => [x.id, x.point, x.style, x.pos, x.type, x.rot]), g: [...M.groups].map(([k, g]) => [k, g.on, g.logos, g.makeDefault]), t: [...M.textEdits].map(([k, v]) => [k, v.length]),
     m: [M.storeNames, M.storeBrands, M.storeYears, M.renames, M.shopPics || new Map(), M.myPlates || new Map()].map(x => [...x.keys(), ...[...x.values()].map(v => typeof v === 'object' ? JSON.stringify(v && v.text !== undefined ? [v.text, v.design, v.gameOff] : v && v.width ? 'pic' : v) : v)]),
-    sl: [...M.shopLogos].map(([k, v]) => [k, v.on, v.logos, v.def, v.none, v.title]) }); } catch (e) { return String(Math.random()); }
+    sl: [...M.shopLogos].map(([k, v]) => [k, v.on, v.logos, v.def, v.none, v.title]), sp: [...(M.specs || new Map())].map(([k, m]) => [k, ...m]), spl: specLinkOn() }); } catch (e) { return String(Math.random()); }
 }
 const unsaved = () => !!(S.mod && changeCount() && changeSig() !== S.mod.savedSig);
-function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren) + p.pla.length + (p.pic || []).length; }
+function changeCount() { const p = plan(); return p.tex.length + p.grp.length + p.txt.length + p.stk.length + nameCount(p.ren) + p.pla.length + (p.pic || []).length + specCount(p.spc); }
 function updateChanges() {
-  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames + p.pla.length + p.pic.length;
+  if (!S.mod) return; const p = plan(), nOpt = p.grp.reduce((a, g) => a + S.mod.groups.get(groupKey(g)).logos.length, 0), nNames = nameCount(p.ren); const nSpec = specCount(p.spc); let n = p.tex.length + nOpt + p.txt.length + p.stk.length + nNames + p.pla.length + p.pic.length + nSpec;
+  $('cntSpecs').textContent = nSpec || '';
   const nSt = p.stk.reduce((a, st) => a + 1 + (st.twin ? 1 : 0), 0);
   $('cntStickers').textContent = nSt || '';
   const parts = []; if (nSt) parts.push(`<b>${nSt}</b> sticker${nSt === 1 ? '' : 's'}`); if (p.tex.length) parts.push(`<b>${p.tex.length}</b> texture${p.tex.length === 1 ? '' : 's'}`); if (nOpt) parts.push(`<b>${nOpt}</b> shop choice${nOpt === 1 ? '' : 's'}`); if (p.txt.length) parts.push(`<b>${p.txt.length}</b> file edit${p.txt.length === 1 ? '' : 's'}`); if (nNames) parts.push(`<b>${nNames}</b> shop setting${nNames === 1 ? '' : 's'}`); if (p.pla.length) parts.push(`<b>${p.pla.length}</b> plate${p.pla.length === 1 ? '' : 's'}`); if (p.pic.length) parts.push(`<b>${p.pic.length}</b> shop picture${p.pic.length === 1 ? '' : 's'}`);
+  if (nSpec) parts.push(`<b>${nSpec}</b> spec${nSpec === 1 ? '' : 's'}`);
   $('changeSum').innerHTML = n ? parts.join(' · ') : 'No changes yet';
   $('btnSave').disabled = !n; $('navChanges').hidden = !n; $('navChanges').textContent = n;
 }
@@ -2140,6 +2189,7 @@ async function saveMod() {
     const textOut = new Map(txt); let wantBrandMod = false;
     const byXml = new Map(); for (const g of grp) { if (!byXml.has(g.xml)) byXml.set(g.xml, []); byXml.get(g.xml).push(g); }
     for (const xml of ren.keys()) if (!byXml.has(xml)) byXml.set(xml, []);
+    for (const [xml] of plan().spc) if (!byXml.has(xml)) byXml.set(xml, []);
     for (const [xml, gs] of byXml) {
       if (textOut.has(xml)) { say(`Skipped shop choices and names in ${xml}: you edited that file by hand. Revert it in Files to change them here.`); await new Promise(r => setTimeout(r, 1500)); continue; }
       const raw = M.files.get(xml); let src = new TextDecoder().decode(raw).replace(/^﻿/, '');
@@ -2158,6 +2208,7 @@ async function saveMod() {
       const rn = ren.get(xml);
       if (rn) { for (const [tag, m] of rn.sets) src = Core.renameConfigItems(src, tag, m); if (rn.store) src = Core.setStoreName(src, rn.store);
         if (rn.brand) { src = Core.setStoreBrand(src, rn.brand); if (myBrandKeys().has(rn.brand)) wantBrandMod = true; } if (rn.year) src = Core.setStoreYear(src, rn.year); }
+      if (M.specs.has(xml)) src = Specs.apply(src, M.specs.get(xml), { link: specLinkOn() }).text; // specs last: new shop choices are found by position in the original file
       textOut.set(xml, src);
     }
     // stickers: new geometry + material + texture per model file

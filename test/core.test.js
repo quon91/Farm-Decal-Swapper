@@ -132,4 +132,17 @@ test('mod check: a mod that needs a missing brand mod gets a fix that drops the 
   const ok = MC.analyze(mod, { installed: new Set(['fs25_my_brand']), oldCatMod: 'FS25_MY_Categories', brandMod: 'FS25_MY_Brand', ownBrands: new Set(['MYFARMS']), brandModBrands: new Set(['MYFARMS']) });
   assert.ok(!ok.problems.some(p => p.kind === 'ownbrand' || p.kind === 'dependency'));
 });
+test('specs: reads and writes working speed, capacity and engine power', () => {
+  const Sp = require('../src/specs.js');
+  const x = '<vehicle>\n    <storeData>\n        <specs>\n            <power>200</power>\n        </specs>\n        <price>1000</price>\n    </storeData>\n    <base>\n        <filename>a.i3d</filename>\n    </base>\n    <motorized><motorConfigurations><motorConfiguration name="A" hp="200"><motor torqueScale="1.5" maxForwardSpeed="40"/></motorConfiguration></motorConfigurations></motorized>\n    <fillUnit><fillUnitConfigurations><fillUnitConfiguration><fillUnits><fillUnit fillTypes="wheat barley" capacity="8000"/></fillUnits></fillUnitConfiguration></fillUnitConfigurations></fillUnit>\n</vehicle>\n';
+  const F = Sp.fields(x), by = k => F.find(f => f.key === k);
+  assert.strictEqual(by('cap').value, '8000'); assert.strictEqual(by('hp').value, '200'); assert.ok(!F.some(f => f.add), 'no working speed added to a motorized vehicle');
+  const r = Sp.apply(x, new Map([[by('hp').id, '300'], [by('cap').id, '12000'], [by('price').id, '1500']]));
+  assert.ok(/hp="300"/.test(r.text) && /torqueScale="2.25"/.test(r.text) && /<power>300<\/power>/.test(r.text) && /capacity="12000"/.test(r.text) && /<price>1500<\/price>/.test(r.text));
+  assert.strictEqual(r.count, 3);
+  const off = Sp.apply(x, new Map([[by('hp').id, '300']]), { link: false }); assert.ok(/torqueScale="1.5"/.test(off.text));
+  const trailer = '<vehicle>\n    <base>\n        <filename>t.i3d</filename>\n    </base>\n</vehicle>';
+  const t2 = Sp.apply(trailer, new Map([['add:speedLimit', '50']])).text;
+  assert.ok(/<filename>t.i3d<\/filename>\n        <speedLimit value="50" \/>\n    <\/base>/.test(t2), t2);
+});
 console.log(`\n${n} tests passed`);

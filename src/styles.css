@@ -373,3 +373,15 @@ input[type=range]{accent-color:var(--accent);width:100%}
 .catrow .note{flex-basis:100%;font-size:.76rem;color:var(--muted);margin:-2px 0 0 86px}
 .metafield select{max-width:260px}
 .metafield input.bad{border-color:#b3261e}
+.specrow{display:grid;grid-template-columns:minmax(0,1fr) 8.5em 3em 11em;gap:10px;align-items:center;padding:8px 16px;border-top:1px solid var(--line);font-size:.88rem}
+.specrow .what{display:flex;flex-direction:column;gap:1px;min-width:0}
+.specrow .what small{color:var(--muted);font-size:.76rem}
+.specrow input{width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);border-radius:6px;padding:.3em .5em;font:inherit;font-variant-numeric:tabular-nums;text-align:right}
+.specrow input.bad{border-color:#b3261e}
+.specrow.changed{background:var(--accent-soft)}
+.specrow .was{font-size:.76rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.specrow .unit{color:var(--muted);font-size:.8rem}
+.specgroup{padding:6px 16px;font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--sunk);border-top:1px solid var(--line)}
+.opthead .row-between{display:flex;justify-content:space-between;align-items:center;gap:8px}
+#tab-specs>.check{font-size:.88rem;max-width:80ch}
+@media (max-width:560px){.specrow{grid-template-columns:minmax(0,1fr) 7em 3.5em}.specrow .was{grid-column:1/-1}}

@@ -76,6 +76,7 @@
         <button type="button" role="tab" class="tab" data-tab="logos" aria-selected="true">Logos &amp; decals</button>
         <button type="button" role="tab" class="tab" data-tab="place" aria-selected="false">Place logos <span class="tcount" id="cntStickers"></span></button>
         <button type="button" role="tab" class="tab" data-tab="options" aria-selected="false">Shop options <span class="tcount" id="cntOptions"></span></button>
+        <button type="button" role="tab" class="tab" data-tab="specs" aria-selected="false">Specs <span class="tcount" id="cntSpecs"></span></button>
         <button type="button" role="tab" class="tab" data-tab="textures" aria-selected="false">All textures <span class="tcount" id="cntTex"></span></button>
         <button type="button" role="tab" class="tab" data-tab="files" aria-selected="false">Files <span class="tcount" id="cntFiles"></span></button>
       </div>
@@ -144,6 +145,11 @@
       <div class="tabpane" id="tab-options" hidden>
         <p class="lead">Rename what the shop shows, and add your logos as decal choices. A choice whose picture you replaced with a logo is named after that logo automatically; you can type any name instead.</p>
         <div id="optList"></div>
+      </div>
+      <div class="tabpane" id="tab-specs" hidden>
+        <p class="lead">Working speed, how much it holds, engine power, top speed, unload speed, weight and price: the numbers this mod already has. Change any of them and save the mod.</p>
+        <label class="check"><input type="checkbox" id="specLink"> <span>Keep things in step: changing an engine’s power changes its pulling force to match, and the shop text follows the real power and top speed</span></label>
+        <div id="specList"></div>
       </div>
       <div class="tabpane" id="tab-textures" hidden>
         <div class="toolbar"><input type="search" id="texSearch" placeholder="Search textures" aria-label="Search textures">
@@ -471,6 +477,7 @@
 <script src="lmfonts.js"></script>
 <script src="logomaker.js"></script>
 <script src="modcheck.js"></script>
+<script src="specs.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
